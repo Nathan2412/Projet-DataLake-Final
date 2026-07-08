@@ -13,7 +13,7 @@ Membres du groupe :
 
 - Artemie Smogunov
 - Nathan Smadja-Tubiana
-- Patrice Ignongui
+- Patrice Ignongui 
 
 Livrables principaux :
 
