@@ -11,14 +11,14 @@ Repository GitHub final : https://github.com/Nathan2412/Projet-DataLake-Final
 
 Membres du groupe :
 
-- Artemie Smogunov
+- Artemiy Smogunov
 - Nathan Smadja-Tubiana
-- Patrice Ignongui 
+- Patrice Ignongui
 
 Livrables principaux :
 
-- [Rapport technique PDF](livrables/Rapport_DataLake_Finance_Artemie_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf)
-- [Documentation technique PDF](livrables/Documentation_Technique_DataLake_Finance_Artemie_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf)
+- [Rapport technique PDF](livrables/Rapport_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf)
+- [Documentation technique PDF](livrables/Documentation_Technique_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf)
 - [Benchmark avancé JSON](livrables/benchmark_ingest_vs_ingest_fast.json)
 
 Consignes du devoir :

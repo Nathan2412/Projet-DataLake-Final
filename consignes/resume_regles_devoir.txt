@@ -47,12 +47,12 @@ Exigences principales du sujet :
    - les membres du groupe, maximum 3.
 
 Membres du groupe :
-- Artemie Smogunov
+- Artemiy Smogunov
 - Nathan Smadja-Tubiana
 - Patrice Ignongui
 
 Correspondance dans ce depot :
 - README.md : procedure d'installation, architecture, endpoints et benchmark.
-- livrables/Rapport_DataLake_Finance_Artemie_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf
-- livrables/Documentation_Technique_DataLake_Finance_Artemie_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf
+- livrables/Rapport_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf
+- livrables/Documentation_Technique_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf
 - livrables/benchmark_ingest_vs_ingest_fast.json
