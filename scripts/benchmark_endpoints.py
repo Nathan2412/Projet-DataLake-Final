@@ -115,6 +115,13 @@ def _batch_report(base_url: str, period: str, batch_size: int, repeats: int, tim
     ) if standard_wall_ms_median else 0.0
 
     target_gain_pct = 30
+    valid = all(
+        sample["standard_status"] == "success"
+        and sample["fast_status"] == "success"
+        and not sample["standard_errors"]
+        and not sample["fast_errors"]
+        for sample in samples
+    )
 
     return {
         "batch_size": batch_size,
@@ -124,7 +131,8 @@ def _batch_report(base_url: str, period: str, batch_size: int, repeats: int, tim
         "fast_wall_ms_median": fast_wall_ms_median,
         "gain_pct_median": gain_pct_median,
         "target_gain_pct": target_gain_pct,
-        "target_met": gain_pct_median >= target_gain_pct,
+        "valid": valid,
+        "target_met": valid and gain_pct_median >= target_gain_pct,
         "standard_statuses": standard_statuses,
         "fast_statuses": fast_statuses,
     }

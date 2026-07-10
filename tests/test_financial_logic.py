@@ -118,6 +118,7 @@ class RawDocumentAndStagingTests(unittest.TestCase):
             mock_bulk.assert_called_once()
             actions = mock_bulk.call_args[0][1]
             self.assertEqual(actions[0]["_id"], raw_document_id("yfinance_file", "AAPL", "2024-01-02"))
+            self.assertEqual(mock_bulk.call_args.kwargs["refresh"], "wait_for")
 
         payload = {
             "ticker": "MSFT",
@@ -131,6 +132,7 @@ class RawDocumentAndStagingTests(unittest.TestCase):
             mock_bulk.assert_called_once()
             actions = mock_bulk.call_args[0][1]
             self.assertEqual(actions[0]["_id"], raw_document_id("yfinance_api", "MSFT", "2024-02-01"))
+            self.assertEqual(mock_bulk.call_args.kwargs["refresh"], "wait_for")
 
 
 if __name__ == "__main__":

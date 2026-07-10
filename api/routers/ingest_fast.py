@@ -248,7 +248,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
                     },
                 })
         if es_actions:
-            es_helpers.bulk(es, es_actions, raise_on_error=False)
+            es_helpers.bulk(es, es_actions, raise_on_error=False, refresh="wait_for")
 
     raw_duration_ms = int((time.perf_counter() - t0) * 1000)
     pipeline_steps["raw"] = {

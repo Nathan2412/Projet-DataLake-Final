@@ -27,8 +27,8 @@ def test_benchmark_repeats_and_alternating_order_and_payload_equality() -> None:
         100: [0.120, 0.100, 0.070, 0.080, 0.040, 0.095],
     }
     statuses = {
-        1: {"ingest": "standard", "ingest_fast": "fast"},
-        100: {"ingest": "standard", "ingest_fast": "fast"},
+        1: {"ingest": "success", "ingest_fast": "success"},
+        100: {"ingest": "success", "ingest_fast": "success"},
     }
 
     with patch.object(target, "post_json", side_effect=_fake_post_factory(calls, timing, statuses)):
@@ -58,6 +58,7 @@ def test_benchmark_repeats_and_alternating_order_and_payload_equality() -> None:
     assert batch1["standard_wall_ms_median"] == 50.0
     assert batch1["fast_wall_ms_median"] == 20.0
     assert batch1["gain_pct_median"] == 60.0
+    assert batch1["valid"] is True
     assert batch1["target_met"] is True
 
     assert batch100["target_met"] is False
@@ -67,8 +68,8 @@ def test_benchmark_metadata_fields() -> None:
     calls = []
     timing = {1: [0.1, 0.1, 0.2, 0.2, 0.05, 0.05], 100: [1.0, 0.5, 1.1, 0.7, 0.9, 0.4]}
     statuses = {
-        1: {"ingest": "ok", "ingest_fast": "ok"},
-        100: {"ingest": "ok", "ingest_fast": "ok"},
+        1: {"ingest": "success", "ingest_fast": "success"},
+        100: {"ingest": "success", "ingest_fast": "success"},
     }
 
     with patch.object(target, "post_json", side_effect=_fake_post_factory(calls, timing, statuses)):
@@ -82,3 +83,18 @@ def test_benchmark_metadata_fields() -> None:
     assert isinstance(report["python_version"], str) and report["python_version"]
     assert isinstance(report["platform"], str) and report["platform"]
     assert isinstance(report["git_commit"], str)
+
+
+def test_failed_run_cannot_meet_target() -> None:
+    calls = []
+    timing = {1: [1.0, 0.1] * 3, 100: [1.0, 0.1] * 3}
+    statuses = {
+        1: {"ingest": "success", "ingest_fast": "partial"},
+        100: {"ingest": "success", "ingest_fast": "partial"},
+    }
+
+    with patch.object(target, "post_json", side_effect=_fake_post_factory(calls, timing, statuses)):
+        report = target.benchmark("http://localhost:8000", period="5d", repeats=3, timeout=60)
+
+    assert all(result["valid"] is False for result in report["results"])
+    assert all(result["target_met"] is False for result in report["results"])

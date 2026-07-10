@@ -136,7 +136,7 @@ def index_api_data_to_es(es: Elasticsearch, payload: dict) -> int:
     if not actions:
         return 0
 
-    success, _ = helpers.bulk(es, actions, raise_on_error=False)
+    success, _ = helpers.bulk(es, actions, raise_on_error=False, refresh="wait_for")
     log.info("ES API : %d documents indexés pour %s", success, ticker)
     return success
 

@@ -164,7 +164,7 @@ def index_to_elasticsearch(es: Elasticsearch, df: pd.DataFrame, source: str = "y
         for _, row in df.iterrows()
     ]
 
-    success, errors = helpers.bulk(es, actions, raise_on_error=False)
+    success, errors = helpers.bulk(es, actions, raise_on_error=False, refresh="wait_for")
     if errors:
         log.warning("%d erreurs lors de l'indexation ES pour %s", len(errors), df["ticker"].iloc[0])
     log.info("ES : %d documents indexés pour %s", success, df["ticker"].iloc[0])
