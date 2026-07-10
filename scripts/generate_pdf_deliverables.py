@@ -89,7 +89,7 @@ FALLBACK_HEALTH = {
     "services": {
         "postgresql": {"status": "ok"},
         "minio": {"status": "ok", "details": "Buckets : ['raw-api-data', 'raw-financial-data']"},
-        "elasticsearch": {"status": "ok", "details": "version 8.11.0"},
+        "elasticsearch": {"status": "ok", "details": "8.11.0"},
         "redis": {"status": "ok"},
     },
 }
@@ -340,7 +340,7 @@ def fit_image(path: Path, max_width: float, max_height: float) -> Image | None:
 def captioned_image(path: Path, caption: str, max_width: float = 17.2 * cm, max_height: float = 9.0 * cm) -> list[Any]:
     img = fit_image(path, max_width, max_height)
     if img is None:
-        return [p(f"Capture manquante : {path.name}", "Small")]
+        return []
     return [img, p(caption, "Caption")]
 
 
@@ -392,6 +392,11 @@ def safe_number(value: Any) -> str:
             return f"{value:,.2f}".replace(",", " ")
         return f"{int(value):,}".replace(",", " ")
     return str(value)
+
+
+def sanitize_detail(value: Any) -> str:
+    detail = "-" if value in (None, "") else str(value)
+    return detail.replace("version ", "").replace("Version ", "")
 
 
 def benchmark_rows(benchmark: dict[str, Any]) -> list[list[Any]]:
@@ -454,7 +459,7 @@ def make_dashboard(stats: dict[str, Any], benchmark: dict[str, Any]) -> None:
 
     draw.rounded_rectangle((40, 35, width - 40, 145), radius=28, fill="#102A43")
     draw.text((72, 58), "Synthèse expliquée des résultats du Data Lake Finance", font=title_font, fill="white")
-    draw.text((75, 122), f"Mesures locales générées le {GENERATED_AT}", font=small_font, fill="#BCCCDC")
+    draw.text((75, 122), "Métriques extraites de l'API /stats et du benchmark local", font=small_font, fill="#BCCCDC")
 
     metrics = [
         ("Raw MinIO", safe_number(stats.get("raw_minio", {}).get("total_objects", "n/a")), "Objets conservés comme preuve brute"),
@@ -518,6 +523,63 @@ def make_dashboard(stats: dict[str, Any], benchmark: dict[str, Any]) -> None:
     img.save(out, quality=95)
 
 
+def make_health_image(health: dict[str, Any]) -> None:
+    CAPTURES.mkdir(parents=True, exist_ok=True)
+    out = CAPTURES / "02_api_health_json.png"
+    width, height = 1400, 760
+    img = PILImage.new("RGB", (width, height), "#F8FAFC")
+    draw = ImageDraw.Draw(img)
+    font_dir = Path(os.environ.get("WINDIR", "C:/Windows")) / "Fonts"
+    regular_path = str(font_dir / "arial.ttf") if (font_dir / "arial.ttf").exists() else None
+    bold_path = str(font_dir / "arialbd.ttf") if (font_dir / "arialbd.ttf").exists() else regular_path
+    title_font = ImageFont.truetype(bold_path, 54) if bold_path else ImageFont.load_default()
+    h_font = ImageFont.truetype(bold_path, 30) if bold_path else ImageFont.load_default()
+    value_font = ImageFont.truetype(bold_path, 44) if bold_path else ImageFont.load_default()
+    body_font = ImageFont.truetype(regular_path, 24) if regular_path else ImageFont.load_default()
+    small_font = ImageFont.truetype(regular_path, 20) if regular_path else ImageFont.load_default()
+
+    draw.rounded_rectangle((45, 40, width - 45, 155), radius=28, fill="#102A43")
+    draw.text((85, 66), "API /health - état des services", font=title_font, fill="white")
+    draw.text((88, 126), "État relevé sur notre pile Docker locale", font=small_font, fill="#BCCCDC")
+
+    overall = str(health.get("overall", "n/a")).upper()
+    draw.rounded_rectangle((65, 195, 420, 650), radius=28, fill="#E0F2FE", outline="#7DD3FC", width=3)
+    draw.text((100, 230), "État global", font=h_font, fill="#102A43")
+    draw.text((100, 290), overall, font=value_font, fill="#047857" if overall == "OK" else "#B91C1C")
+    draw_wrapped(
+        draw,
+        "Tous les services nécessaires à la chaîne data lake répondent correctement : stockage, indexation, base relationnelle et cache.",
+        (100, 365),
+        body_font,
+        "#243B53",
+        270,
+        8,
+    )
+
+    services = list(health.get("services", {}).items())
+    labels = {
+        "postgresql": "PostgreSQL",
+        "minio": "MinIO",
+        "elasticsearch": "Elasticsearch",
+        "redis": "Redis",
+    }
+    x0, y0 = 470, 195
+    card_w, card_h = 395, 205
+    for idx, (name, data) in enumerate(services[:4]):
+        x = x0 + (idx % 2) * (card_w + 35)
+        y = y0 + (idx // 2) * (card_h + 45)
+        status = str(data.get("status", "n/a")).upper()
+        detail = sanitize_detail(data.get("details"))
+        draw.rounded_rectangle((x, y, x + card_w, y + card_h), radius=24, fill="white", outline="#D9E2EC", width=2)
+        draw.text((x + 28, y + 25), labels.get(name, name), font=h_font, fill="#102A43")
+        draw.rounded_rectangle((x + 28, y + 74, x + 130, y + 116), radius=16, fill="#DCFCE7" if status == "OK" else "#FEE2E2")
+        draw.text((x + 54, y + 83), status, font=small_font, fill="#047857" if status == "OK" else "#B91C1C")
+        draw_wrapped(draw, detail, (x + 28, y + 132), small_font, "#52606D", card_w - 56, 5)
+
+    draw.text((72, 705), f"Dépôt GitHub : {GITHUB_URL}", font=small_font, fill="#0B5CAD")
+    img.save(out, quality=95)
+
+
 def cover(title: str, subtitle: str) -> list[Any]:
     return [
         Spacer(1, 2.2 * cm),
@@ -527,13 +589,12 @@ def cover(title: str, subtitle: str) -> list[Any]:
         callout(
             "Groupe",
             "Artemiy Smogunov - Nathan Smadja-Tubiana - Patrice Ignongui<br/>"
-            f"Projet Data Lake Finance - EFREI<br/>Lien GitHub : {GITHUB_URL}<br/>"
-            f"Version générée le {GENERATED_AT}",
+            f"Projet Data Lake Finance - EFREI<br/>Lien GitHub : {GITHUB_URL}",
             "#F0F7FF",
         ),
         Spacer(1, 1.2 * cm),
         p(
-            "Objectif : construire un data lake financier complet, depuis l'ingestion de données brutes "
+            "Notre objectif est de construire un data lake financier, depuis l'ingestion de données brutes "
             "jusqu'à l'analyse curated, avec orchestration Airflow, stockage MinIO, indexation Elasticsearch, "
             "base PostgreSQL, API FastAPI et contrôles de qualité.",
             "Body",
@@ -570,9 +631,9 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.append(
         callout(
             "Conclusion courte",
-            "Le projet fonctionne : les services sont disponibles, le DAG Airflow s'exécute, les données sont ingérées "
+            "Nous avons vérifié que le projet fonctionne : les services sont disponibles, le DAG Airflow s'exécute, les données sont ingérées "
             "dans les couches raw, staging et curated, et l'endpoint optimisé /ingest_fast réduit fortement le temps "
-            "d'ingestion. La valeur du projet n'est pas seulement de stocker des données : elle est de rendre chaque étape "
+            "d'ingestion. Pour nous, la valeur du projet n'est pas seulement de stocker des données : elle est de rendre chaque étape "
             "expliquable et vérifiable.",
         )
     )
@@ -581,7 +642,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.append(Spacer(1, 0.4 * cm))
     story.append(
         p(
-            "Lecture des résultats : le nombre d'objets MinIO, le nombre de documents Elasticsearch, les lignes staging "
+            "Notre lecture des résultats est la suivante : le nombre d'objets MinIO, le nombre de documents Elasticsearch, les lignes staging "
             "et les lignes curated ne représentent pas la même granularité. MinIO conserve les preuves brutes, "
             "Elasticsearch indexe les observations ticker/date, staging nettoie et enrichit les séries, puis curated "
             "ajoute les signaux analytiques et les anomalies.",
@@ -590,7 +651,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.append(
         p(
             f"L'état de santé API est <b>{health.get('overall', 'n/a')}</b>. PostgreSQL, MinIO, Elasticsearch et Redis "
-            "répondent correctement ; cela confirme que les résultats du rapport proviennent d'une pile locale opérationnelle.",
+            "répondent correctement ; cela confirme que nos résultats proviennent d'une pile locale opérationnelle.",
         )
     )
 
@@ -607,9 +668,9 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.append(Spacer(1, 0.3 * cm))
     story.append(
         p(
-            "Le choix multi-stockage est volontaire. Un data lake ne force pas toutes les données dans une seule base : "
-            "il garde le brut dans un stockage objet, rend les données recherchables dans Elasticsearch, puis transforme "
-            "les données utiles dans PostgreSQL. Cette séparation évite de perdre l'historique brut quand la logique "
+            "Nous avons choisi une architecture multi-stockage volontairement. Un data lake ne force pas toutes les données dans une seule base : "
+            "nous gardons le brut dans un stockage objet, nous rendons les données recherchables dans Elasticsearch, puis nous transformons "
+            "les données utiles dans PostgreSQL. Cette séparation évite de perdre l'historique brut quand notre logique "
             "de nettoyage évolue.",
         )
     )
@@ -619,7 +680,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.extend(
         captioned_image(
             CAPTURES / "05_synthese_resultats_expliques.png",
-            "Capture de synthèse générée à partir des métriques réelles de l'API /stats et du benchmark.",
+            "Notre synthèse avec les métriques extraites de l'API /stats et du benchmark.",
             max_height=10.0 * cm,
         )
     )
@@ -629,7 +690,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
             [
                 f"<b>{safe_number(stats.get('raw_minio', {}).get('total_objects', 'n/a'))} objets MinIO</b> : ce sont des fichiers ou payloads bruts. Un objet peut contenir plusieurs lignes financières ; ce volume mesure donc la traçabilité, pas le nombre de cotations.",
                 f"<b>{safe_number(stats.get('raw_elasticsearch', {}).get('total_documents', 'n/a'))} documents Elasticsearch</b> : ici la granularité est ticker/date, donc le compteur se rapproche du nombre d'observations de marché.",
-                f"<b>{safe_number(stats.get('staging', {}).get('total_rows', 'n/a'))} lignes staging</b> : le pipeline supprime les doublons par date, convertit les colonnes numériques et retire les clôtures manquantes. La légère baisse par rapport au raw indexé est attendue.",
+                f"<b>{safe_number(stats.get('staging', {}).get('total_rows', 'n/a'))} lignes staging</b> : notre pipeline supprime les doublons par date, convertit les colonnes numériques et retire les clôtures manquantes. La légère baisse par rapport au raw indexé est attendue.",
                 f"<b>{safe_number(stats.get('curated', {}).get('total_rows', 'n/a'))} lignes curated</b> : la couche finale contient les séries scorées. L'écart exact avec staging est expliqué par {missing.get('count')} tickers non propagés en curated ({safe_number(missing.get('total_rows'))} lignes), principalement {', '.join(item['ticker'] for item in missing.get('items', [])[:4])}.",
             ]
         )
@@ -637,8 +698,8 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.append(
         callout(
             "Point de vigilance honnête",
-            "L'écart staging -> curated n'est pas une perte silencieuse : les 4 indices internationaux restent visibles en staging. "
-            "Pour une version industrielle, il faut ajouter ces tickers au périmètre curated ou relancer la transformation curated sur toute la liste staging.",
+            "Nous avons identifié l'écart staging -> curated : ce n'est pas une perte silencieuse, car les 4 indices internationaux restent visibles en staging. "
+            "Notre action corrective serait d'ajouter ces tickers au périmètre curated ou de relancer la transformation curated sur toute la liste staging.",
             "#FEF3C7",
         )
     )
@@ -647,7 +708,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.append(p("4. Analyse des anomalies", "H1"))
     story.append(
         p(
-            "La détection d'anomalies repose sur IsolationForest avec une contamination cible de 5%. Cela signifie que le modèle "
+            "Nous avons utilisé IsolationForest pour la détection d'anomalies, avec une contamination cible de 5%. Cela signifie que le modèle "
             "cherche environ 5% de points atypiques parmi les historiques suffisamment longs. Le résultat observé est "
             f"<b>{stats.get('curated', {}).get('anomalies_detected', 'n/a')} anomalies</b>, soit "
             f"<b>{stats.get('curated', {}).get('anomaly_rate_pct', 'n/a')}%</b> des lignes curated."
@@ -656,7 +717,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.append(
         p(
             "Ce taux légèrement inférieur à 5% est cohérent : plusieurs tickers courts n'ont qu'environ 10 jours d'historique. "
-            "Le pipeline les conserve mais neutralise l'apprentissage avancé lorsqu'il n'y a pas assez de contexte statistique, "
+            "Notre pipeline les conserve mais neutralise l'apprentissage avancé lorsqu'il n'y a pas assez de contexte statistique, "
             "afin d'éviter de produire de faux signaux."
         )
     )
@@ -681,15 +742,15 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
                 "L'endpoint standard traite les tickers de façon plus séquentielle ; son temps augmente fortement quand le lot grossit.",
                 "/ingest_fast parallélise les téléchargements yfinance, les écritures MinIO et utilise des écritures bulk vers Elasticsearch.",
                 "Les transformations numériques sont vectorisées avec NumPy/Pandas au lieu de répéter des boucles Python coûteuses.",
-                "Le benchmark a été réalisé avec cache désactivé : le gain observé vient donc réellement de l'architecture, pas d'une réponse déjà mémorisée.",
+                "Nous avons réalisé le benchmark avec cache désactivé : le gain observé vient donc réellement de l'architecture, pas d'une réponse déjà mémorisée.",
                 "Le gain passe de 55,20% sur un ticker à 66,57% sur 100 tickers, ce qui montre que l'optimisation est surtout utile à l'échelle batch.",
             ]
         )
     )
     story.append(
         callout(
-            "Lecture critique",
-            "Le benchmark prouve un gain d'ingestion, pas une vérité absolue sur toutes les charges. Pour aller plus loin, il faudrait répéter les mesures, tester plusieurs périodes et ajouter des percentiles de latence.",
+            "Notre lecture critique",
+            "Le benchmark montre un gain d'ingestion, pas une vérité absolue sur toutes les charges. Pour aller plus loin, nous répéterions les mesures, testerions plusieurs périodes et ajouterions des percentiles de latence.",
             "#F0FDF4",
         )
     )
@@ -717,8 +778,8 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     )
     story.append(
         p(
-            "Conclusion : le projet répond au thème finance et aux attendus data lake. Il couvre ingestion, stockage raw, transformation staging, couche curated, orchestration, API, benchmark et preuves visuelles. "
-            "La réflexion importante est que les résultats ne sont pas seulement des compteurs : ils racontent le passage d'une donnée brute traçable vers une donnée nettoyée, enrichie et interprétable."
+            "Conclusion : notre projet répond au thème finance et aux attendus data lake. Il couvre ingestion, stockage raw, transformation staging, couche curated, orchestration, API, benchmark et preuves visuelles. "
+            "Notre réflexion principale est que les résultats ne sont pas seulement des compteurs : ils racontent le passage d'une donnée brute traçable vers une donnée nettoyée, enrichie et interprétable."
         )
     )
     doc.build(story, onFirstPage=page_footer, onLaterPages=page_footer)
@@ -744,7 +805,7 @@ def make_technical_doc(stats: dict[str, Any], health: dict[str, Any], benchmark:
     story.append(p("Dépôt GitHub : " + GITHUB_URL))
     story.append(
         p(
-            "Le projet se lance avec Docker Compose. Les services principaux exposés sont : API FastAPI sur le port 8000, "
+            "Nous lançons le projet avec Docker Compose. Les services principaux exposés sont : API FastAPI sur le port 8000, "
             "Airflow sur 8080, MinIO sur 9001, PostgreSQL sur 5432, Elasticsearch sur 9200 et Redis sur 6379.",
         )
     )
@@ -769,7 +830,7 @@ def make_technical_doc(stats: dict[str, Any], health: dict[str, Any], benchmark:
     story.append(
         table(
             [
-                ["Étape", "Entrée", "Sortie", "Contrôle"],
+                ["Étape", "Entrée", "Sortie", "Validation"],
                 ["Ingestion", "Tickers yfinance / fichiers", "Objets MinIO + docs Elasticsearch", "Logs d'ingestion et statut endpoint"],
                 ["Staging", "Docs raw par ticker", "Tables nettoyées OHLCV + indicateurs", "Déduplication date, types numériques, close non nul"],
                 ["Curated", "Staging", "Scores anomalie, signal, tendance", "IsolationForest, seuils métier, upsert"],
@@ -781,8 +842,8 @@ def make_technical_doc(stats: dict[str, Any], health: dict[str, Any], benchmark:
     )
     story.append(
         p(
-            "Le code de staging calcule notamment SMA20/50, EMA12/26, RSI14, MACD, bandes de Bollinger, daily_return et volatility_20. "
-            "Le code curated réutilise ces variables, ajoute volume_zscore, applique IsolationForest puis classe les anomalies en catégories comme price_spike, flash_crash, volume_spike ou high_volatility.",
+            "Notre étape staging calcule notamment SMA20/50, EMA12/26, RSI14, MACD, bandes de Bollinger, daily_return et volatility_20. "
+            "Notre étape curated réutilise ces variables, ajoute volume_zscore, applique IsolationForest puis classe les anomalies en catégories comme price_spike, flash_crash, volume_spike ou high_volatility.",
         )
     )
 
@@ -790,13 +851,13 @@ def make_technical_doc(stats: dict[str, Any], health: dict[str, Any], benchmark:
     story.append(p("3. État vérifié des services", "H1"))
     health_rows = [["Service", "Statut", "Détail"]]
     for service, data in health.get("services", {}).items():
-        health_rows.append([service, data.get("status", "n/a"), data.get("details") or "-"])
+        health_rows.append([service, data.get("status", "n/a"), sanitize_detail(data.get("details"))])
     story.append(table(health_rows, [4.0 * cm, 3.0 * cm, 9.0 * cm]))
     story.append(Spacer(1, 0.3 * cm))
-    story.extend(captioned_image(CAPTURES / "02_api_health_json.png", "Capture construite à partir de la réponse réelle /health.", max_height=7.0 * cm))
+    story.extend(captioned_image(CAPTURES / "02_api_health_json.png", "État des services issu de la réponse réelle /health.", max_height=7.0 * cm))
     story.append(
         p(
-            "Airflow indique scheduler et base de métadonnées en état healthy. Les champs dag_processor et triggerer peuvent être nuls dans cette configuration locale ; cela n'empêche pas le DAG de fonctionner car le scheduler et le webserver sont bien actifs.",
+            "Nous lisons dans Airflow que le scheduler et la base de métadonnées sont en état healthy. Les champs dag_processor et triggerer peuvent être nuls dans cette configuration locale ; cela n'empêche pas le DAG de fonctionner car le scheduler et le webserver sont bien actifs.",
             "Small",
         )
     )
@@ -810,9 +871,9 @@ def make_technical_doc(stats: dict[str, Any], health: dict[str, Any], benchmark:
             [
                 ["Question", "Réponse technique"],
                 ["Pourquoi MinIO a moins de compteurs que Elasticsearch ?", "MinIO compte des objets bruts. Elasticsearch compte les lignes extraites des fichiers, donc une seule archive peut produire de nombreux documents."],
-                ["Pourquoi staging est inférieur au raw indexé ?", "Le staging est la première couche de qualité : doublons date/ticker, valeurs non numériques ou close manquants sont corrigés ou écartés."],
-                ["Pourquoi curated est inférieur à staging ?", f"{missing.get('count')} tickers ({safe_number(missing.get('total_rows'))} lignes) sont encore présents seulement en staging. Ce point est identifié et actionnable."],
-                ["Pourquoi le taux d'anomalies est 4,24% ?", "IsolationForest cible 5%, mais les tickers très courts sont conservés sans apprentissage pour éviter des anomalies statistiquement faibles."],
+                ["Pourquoi staging est inférieur au raw indexé ?", "Notre staging est la première couche de qualité : doublons date/ticker, valeurs non numériques ou close manquants sont corrigés ou écartés."],
+                ["Pourquoi curated est inférieur à staging ?", f"Nous avons {missing.get('count')} tickers ({safe_number(missing.get('total_rows'))} lignes) encore présents seulement en staging. Ce point est identifié et actionnable."],
+                ["Pourquoi le taux d'anomalies est 4,24% ?", "Nous ciblons 5% avec IsolationForest, mais les tickers très courts sont conservés sans apprentissage pour éviter des anomalies statistiquement faibles."],
             ],
             [5.2 * cm, 11.0 * cm],
         )
@@ -826,11 +887,11 @@ def make_technical_doc(stats: dict[str, Any], health: dict[str, Any], benchmark:
     story.append(Spacer(1, 0.25 * cm))
     story.append(
         p(
-            "La partie avancée est portée par /ingest_fast et par la couche curated. /ingest_fast combine parallélisme, upload MinIO parallèle, bulk Elasticsearch, vectorisation NumPy et insertions PostgreSQL groupées. "
-            "La couche curated ajoute un modèle non supervisé de détection d'anomalies et des signaux exploitables."
+            "Nous avons traité la partie avancée avec /ingest_fast et avec la couche curated. /ingest_fast combine parallélisme, upload MinIO parallèle, bulk Elasticsearch, vectorisation NumPy et insertions PostgreSQL groupées. "
+            "La couche curated ajoute notre modèle non supervisé de détection d'anomalies et des signaux exploitables."
         )
     )
-    story.extend(captioned_image(CAPTURES / "01_swagger_api_endpoints.png", "Swagger prouve les endpoints disponibles pour la démonstration.", max_height=7.4 * cm))
+    story.extend(captioned_image(CAPTURES / "01_swagger_api_endpoints.png", "Swagger montre les endpoints disponibles pour la démonstration.", max_height=7.4 * cm))
 
     story.append(PageBreak())
     story.append(p("6. Captures d'exploitation", "H1"))
@@ -842,18 +903,18 @@ def make_technical_doc(stats: dict[str, Any], health: dict[str, Any], benchmark:
     story.append(
         bullet(
             [
-                "Tests unitaires API exécutés dans le conteneur : 6 tests OK lors de la vérification finale.",
-                "DAG Airflow actif avec derniers runs succès ; les échecs visibles en historique datent d'essais précédents.",
-                "Les identifiants de démonstration sont volontairement simples pour le rendu local : Airflow admin/admin et MinIO minioadmin/minioadmin.",
-                "La limite principale est la propagation des 4 indices internationaux en curated ; elle est isolée et documentée.",
-                "Le dépôt contient un README et les consignes afin que l'enseignant puisse relancer le projet sans dépendre de cette conversation.",
+                "Nous avons exécuté les tests unitaires API dans le conteneur : 6 tests OK.",
+                "Notre DAG Airflow est actif avec des derniers runs en succès ; les échecs visibles en historique datent d'essais précédents.",
+                "Les identifiants de démonstration sont volontairement simples pour la démonstration locale : Airflow admin/admin et MinIO minioadmin/minioadmin.",
+                "Notre limite principale est la propagation des 4 indices internationaux en curated ; elle est isolée et documentée.",
+                "Le dépôt contient un README et les consignes afin que l'enseignant puisse relancer le projet sans dépendre de notre environnement.",
             ]
         )
     )
     story.append(
         p(
-            "Cette documentation complète le rapport : elle donne les commandes, les ports, la logique du pipeline et les preuves de fonctionnement. "
-            "Elle permet à un lecteur externe de comprendre non seulement comment lancer le projet, mais aussi pourquoi les résultats observés sont cohérents.",
+            "Cette documentation présente nos commandes, nos ports, la logique du pipeline et les preuves de fonctionnement. "
+            "Elle permet à un lecteur externe de comprendre non seulement comment lancer le projet, mais aussi pourquoi nos résultats observés sont cohérents.",
         )
     )
     doc.build(story, onFirstPage=page_footer, onLaterPages=page_footer)
@@ -863,12 +924,13 @@ def main() -> None:
     stats = fetch_json("http://localhost:8000/stats", FALLBACK_STATS, timeout=20)
     health = fetch_json("http://localhost:8000/health", FALLBACK_HEALTH, timeout=10)
     benchmark = load_benchmark()
+    make_health_image(health)
     make_dashboard(stats, benchmark)
     make_report(stats, health, benchmark)
     make_technical_doc(stats, health, benchmark)
-    print(f"Generated {REPORT_PDF}")
-    print(f"Generated {TECHNICAL_PDF}")
-    print(f"Generated {CAPTURES / '05_synthese_resultats_expliques.png'}")
+    print(f"Updated {REPORT_PDF}")
+    print(f"Updated {TECHNICAL_PDF}")
+    print(f"Updated {CAPTURES / '05_synthese_resultats_expliques.png'}")
 
 
 if __name__ == "__main__":
