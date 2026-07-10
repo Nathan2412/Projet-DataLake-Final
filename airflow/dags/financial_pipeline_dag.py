@@ -6,7 +6,7 @@ Scheduling : quotidien à 6h UTC (après ouverture des marchés européens)
 
 Flux :
   [ingest_file] --|
-                  +--> [transform_staging] --> [transform_curated] --> [notify_done]
+                  +--> [transform_staging] --> [transform_curated] --> [log_summary] --> [end]
   [ingest_api]  --|
 """
 import sys
@@ -38,7 +38,7 @@ DEFAULT_ARGS = {
 # Fonctions appelées par les PythonOperators
 
 def task_ingest_file(**context) -> dict:
-    """Ingère le dataset fichier complet (tickers S&P500 + indices)."""
+    """Ingère le fichier data/finance_dataset.csv."""
     from ingestion.ingest_file import ingest_file_source
     results = ingest_file_source()
     # Push le résumé en XCom pour les tâches aval
