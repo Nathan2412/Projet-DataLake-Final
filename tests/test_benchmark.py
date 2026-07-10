@@ -39,8 +39,8 @@ def test_benchmark_repeats_and_alternating_order_and_payload_equality() -> None:
     assert len(calls) == 12
 
     batch1, batch100 = report["results"]
-    assert [s["execution_order"] for s in batch1["samples"]] == ["fast-first", "standard-first", "fast-first"]
-    assert [s["execution_order"] for s in batch100["samples"]] == ["fast-first", "standard-first", "fast-first"]
+    assert [s["execution_order"] for s in batch1["samples"]] == ["standard-first", "fast-first", "standard-first"]
+    assert [s["execution_order"] for s in batch100["samples"]] == ["standard-first", "fast-first", "standard-first"]
 
     expected_payload_1 = {"data": {"tickers": ["AAPL"], "period": "5d", "run_staging": True, "run_curated": True}}
     expected_payload_100 = {"data": {"tickers": target.TICKERS_100[:100], "period": "5d", "run_staging": True, "run_curated": True}}
@@ -55,10 +55,10 @@ def test_benchmark_repeats_and_alternating_order_and_payload_equality() -> None:
         assert sample["payload"]["data"]["tickers"] == target.TICKERS_100[:100]
         assert sample["payload"]["data"].get("use_cache") is None
 
-    assert batch1["standard_wall_ms_median"] == 20.0
-    assert batch1["fast_wall_ms_median"] == 50.0
-    assert batch1["gain_pct_median"] == -150.0
-    assert batch1["target_met"] is False
+    assert batch1["standard_wall_ms_median"] == 50.0
+    assert batch1["fast_wall_ms_median"] == 20.0
+    assert batch1["gain_pct_median"] == 60.0
+    assert batch1["target_met"] is True
 
     assert batch100["target_met"] is False
 

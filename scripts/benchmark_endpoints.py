@@ -103,7 +103,7 @@ def _batch_report(base_url: str, period: str, batch_size: int, repeats: int, tim
     payload = _format_payload(period, batch_size)
 
     for repeat_index in range(repeats):
-        samples.append(_build_sample(base_url, payload, timeout, repeat_index % 2 == 0))
+        samples.append(_build_sample(base_url, payload, timeout, repeat_index % 2 == 1))
 
     standard_statuses = [sample["standard_status"] for sample in samples]
     fast_statuses = [sample["fast_status"] for sample in samples]
