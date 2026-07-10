@@ -43,6 +43,11 @@ def get_es_client() -> Elasticsearch:
     return Elasticsearch(ES_URL)
 
 
+def raw_document_id(source: str, ticker: str, date: str) -> str:
+    normalized_date = pd.to_datetime(date).strftime("%Y-%m-%d")
+    return f"{source}_{ticker}_{normalized_date}"
+
+
 def ensure_es_index(es: Elasticsearch) -> None:
     """Crée l'index Elasticsearch s'il n'existe pas encore."""
     if not es.indices.exists(index=ES_INDEX_RAW):
@@ -142,7 +147,7 @@ def index_to_elasticsearch(es: Elasticsearch, df: pd.DataFrame, source: str = "y
     actions = [
         {
             "_index": ES_INDEX_RAW,
-            "_id":    f"{row['ticker']}_{row['date']}",
+            "_id":    raw_document_id(source, row['ticker'], row['date']),
             "_source": {
                 "ticker":       row["ticker"],
                 "date":         row["date"],

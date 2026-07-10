@@ -5,10 +5,11 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from ingestion.ingest_file import load_file_dataset
-from transformation.staging.transform_staging import add_technical_indicators, calc_rsi
+from ingestion.ingest_api import index_api_data_to_es
+from ingestion.ingest_file import index_to_elasticsearch, load_file_dataset, raw_document_id
 from transformation.curated.transform_curated import classify_anomaly_type
-from routers.ingest_fast import compute_indicators_vectorized
+from transformation.staging.transform_staging import add_technical_indicators, calc_rsi, prepare_staging_dataframe
+from unittest.mock import MagicMock, patch
 
 
 class FinancialIndicatorTests(unittest.TestCase):
@@ -28,8 +29,9 @@ class FinancialIndicatorTests(unittest.TestCase):
         )
 
     def test_fast_indicators_match_standard_pipeline(self):
-        standard = add_technical_indicators(self.make_frame().copy())
-        fast = compute_indicators_vectorized(self.make_frame().copy())
+        frame = self.make_frame()
+        standard = add_technical_indicators(frame.copy())
+        fast = prepare_staging_dataframe(frame)
         for column in (
             "sma_20",
             "sma_50",
@@ -43,21 +45,14 @@ class FinancialIndicatorTests(unittest.TestCase):
             "daily_return",
             "volatility_20",
         ):
-            np.testing.assert_allclose(
-                standard[column].to_numpy(),
-                fast[column].to_numpy(),
-                rtol=1e-10,
-                atol=1e-10,
-                equal_nan=True,
-                err_msg=column,
-            )
+            pd.testing.assert_series_equal(standard[column], fast[column], check_names=False)
 
     def test_daily_return_uses_previous_close(self):
         frame = self.make_frame().iloc[:3].copy()
         frame["close"] = [100.0, 110.0, 121.0]
-        result = compute_indicators_vectorized(frame)
-        self.assertAlmostEqual(result.loc[1, "daily_return"], 0.10)
-        self.assertAlmostEqual(result.loc[2, "daily_return"], 0.10)
+        result = prepare_staging_dataframe(frame)["daily_return"]
+        self.assertAlmostEqual(result.iloc[1], 0.10)
+        self.assertAlmostEqual(result.iloc[2], 0.10)
 
     def test_rsi_handles_monotonic_and_flat_series(self):
         rising = calc_rsi(pd.Series(np.arange(1.0, 40.0)))
@@ -77,6 +72,7 @@ class FileDatasetTests(unittest.TestCase):
                 ]
             ).to_csv(path, index=False)
             result = load_file_dataset(path)
+
         self.assertEqual(len(result), 1)
         self.assertEqual(result.loc[0, "ticker"], "AAPL")
         self.assertEqual(result.loc[0, "adj_close"], 3)
@@ -93,6 +89,48 @@ class CuratedLogicTests(unittest.TestCase):
     def test_classify_flash_crash(self):
         row = pd.Series({"is_anomaly": True, "daily_return": -0.08, "volume_zscore": 1, "volatility_20": 0.02})
         self.assertEqual(classify_anomaly_type(row), "flash_crash")
+
+
+class RawDocumentAndStagingTests(unittest.TestCase):
+    def test_raw_document_id_is_source_ticker_date(self):
+        self.assertEqual(raw_document_id("yfinance_fast", "aapl", "2024-01-02"), "yfinance_fast_aapl_2024-01-02")
+
+    def test_prepare_staging_dataframe_normalizes_ticker_and_drops_duplicates(self):
+        prepared = prepare_staging_dataframe(
+            pd.DataFrame(
+                [
+                    {"ticker": " aapl ", "date": "2024-01-02", "open": 1, "high": 2, "low": 1, "close": 2, "adj_close": 2, "volume": 10},
+                    {"ticker": "AAPL", "date": "2024-01-02", "open": 2, "high": 3, "low": 1.5, "close": 5, "adj_close": 5, "volume": 20},
+                ]
+            )
+        )
+        self.assertEqual(prepared.loc[0, "ticker"], "AAPL")
+        self.assertEqual(len(prepared), 1)
+
+    def test_file_and_api_indexing_use_source_specific_raw_document_id(self):
+        rows = [
+            {"ticker": "AAPL", "date": "2024-01-02", "open": 1, "high": 2, "low": 1, "close": 2, "adj_close": 2, "volume": 10}
+        ]
+        df = pd.DataFrame(rows)
+        with patch("ingestion.ingest_file.helpers.bulk") as mock_bulk:
+            mock_bulk.return_value = (1, [])
+            index_to_elasticsearch(MagicMock(), df, source="yfinance_file")
+            mock_bulk.assert_called_once()
+            actions = mock_bulk.call_args[0][1]
+            self.assertEqual(actions[0]["_id"], raw_document_id("yfinance_file", "AAPL", "2024-01-02"))
+
+        payload = {
+            "ticker": "MSFT",
+            "records": [
+                {"date": "2024-02-01", "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100},
+            ],
+        }
+        with patch("ingestion.ingest_api.helpers.bulk") as mock_bulk:
+            mock_bulk.return_value = (1, [])
+            index_api_data_to_es(MagicMock(), payload)
+            mock_bulk.assert_called_once()
+            actions = mock_bulk.call_args[0][1]
+            self.assertEqual(actions[0]["_id"], raw_document_id("yfinance_api", "MSFT", "2024-02-01"))
 
 
 if __name__ == "__main__":

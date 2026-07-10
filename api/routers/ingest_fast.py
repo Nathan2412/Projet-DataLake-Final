@@ -1,13 +1,11 @@
 """
-Endpoint POST /ingest_fast : ingestion optimisée ≥30% plus rapide que /ingest.
+Endpoint POST /ingest_fast : ingestion optimisée.
 
 Optimisations appliquées :
 1. Parallélisation du téléchargement yfinance via ThreadPoolExecutor
 2. Upload MinIO en parallèle (threads I/O-bound)
 3. Indexation ES en bulk (une seule requête pour tout le batch)
-4. Vectorisation NumPy pour les indicateurs techniques (pas de boucle pandas)
-5. Cache Redis : si un ticker a été ingéré dans les 5 dernières minutes, skip le download
-6. Staging : execute_values psycopg2 (plus rapide que execute_batch)
+4. Staging : execute_values psycopg2 (plus rapide que execute_batch)
 """
 import logging
 import time
@@ -19,13 +17,15 @@ import numpy as np
 import pandas as pd
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
+from elasticsearch import helpers as es_helpers
 
-from dependencies import get_pg_conn, get_redis
+from dependencies import get_pg_conn
+from ingestion.ingest_file import ensure_es_index, get_es_client, get_minio_client, raw_document_id
+from transformation.staging.transform_staging import prepare_staging_dataframe
 
 log = logging.getLogger(__name__)
 router = APIRouter()
 
-CACHE_TTL_SECONDS = 300   # 5 minutes de cache Redis
 MAX_WORKERS       = 8     # threads pour le download parallèle
 
 
@@ -51,66 +51,6 @@ class IngestFastResponse(BaseModel):
     optimizations:   dict
     errors:          list[dict]
     timestamp:       str
-
-
-# ── Indicateurs techniques vectorisés (NumPy) ─────────────────────────────
-
-def _ema_numpy(values: np.ndarray, span: int) -> np.ndarray:
-    """EMA calculée en pur NumPy — évite la surcharge pandas ewm()."""
-    alpha = 2.0 / (span + 1)
-    result = np.empty_like(values, dtype=float)
-    result[0] = values[0]
-    for i in range(1, len(values)):
-        result[i] = alpha * values[i] + (1 - alpha) * result[i - 1]
-    return result
-
-
-def compute_indicators_vectorized(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Calcul vectorisé des indicateurs techniques.
-    Utilise NumPy + pd.Series.rolling() sans boucles Python explicites.
-    """
-    close  = df["close"].values.astype(float)
-    volume = df["volume"].values.astype(float)
-    # SMA (rolling mean via stride tricks)
-    df["sma_20"]  = pd.Series(close).rolling(20, min_periods=1).mean().values
-    df["sma_50"]  = pd.Series(close).rolling(50, min_periods=1).mean().values
-
-    # EMA (vectorisé NumPy)
-    df["ema_12"]  = _ema_numpy(close, 12)
-    df["ema_26"]  = _ema_numpy(close, 26)
-
-    # MACD
-    macd          = df["ema_12"].values - df["ema_26"].values
-    df["macd"]         = macd
-    df["macd_signal"]  = _ema_numpy(macd, 9)
-
-    # RSI (vectorisé)
-    delta = np.diff(close, prepend=np.nan)
-    gain = np.where(np.isnan(delta), np.nan, np.maximum(delta, 0.0))
-    loss = np.where(np.isnan(delta), np.nan, np.maximum(-delta, 0.0))
-    avg_gain  = pd.Series(gain).ewm(com=13, min_periods=14).mean().values
-    avg_loss  = pd.Series(loss).ewm(com=13, min_periods=14).mean().values
-    rs = np.divide(avg_gain, avg_loss, out=np.full_like(avg_gain, np.nan), where=avg_loss != 0)
-    rsi = 100 - (100 / (1 + rs))
-    rsi = np.where((avg_loss == 0) & (avg_gain > 0), 100.0, rsi)
-    df["rsi_14"] = np.where((avg_loss == 0) & (avg_gain == 0), 50.0, rsi)
-
-    # Bollinger Bands
-    roll        = pd.Series(close).rolling(20, min_periods=1)
-    sma20       = roll.mean().values
-    std20       = roll.std().values
-    df["bollinger_upper"] = sma20 + 2 * std20
-    df["bollinger_lower"] = sma20 - 2 * std20
-
-    # Returns et volatilité
-    previous_close = np.roll(close, 1)
-    previous_close[0] = np.nan
-    ret = (close - previous_close) / previous_close
-    df["daily_return"]  = ret
-    df["volatility_20"] = pd.Series(ret).rolling(20, min_periods=1).std().values
-
-    return df
 
 
 # ── Téléchargement parallèle ───────────────────────────────────────────────
@@ -148,27 +88,9 @@ def _upload_minio_one(minio_client, ticker: str, df: pd.DataFrame) -> None:
     )
 
 
-# ── Cache Redis ────────────────────────────────────────────────────────────
-
-def _cache_key(ticker: str, period: str) -> str:
-    return f"ingest_fast:{ticker}:{period}"
 
 
-def _is_cached(redis_client, ticker: str, period: str) -> bool:
-    try:
-        return redis_client.exists(_cache_key(ticker, period)) == 1
-    except Exception:
-        return False
-
-
-def _set_cache(redis_client, ticker: str, period: str) -> None:
-    try:
-        redis_client.setex(_cache_key(ticker, period), CACHE_TTL_SECONDS, "1")
-    except Exception:
-        pass
-
-
-# ── Staging vectorisé avec execute_values ─────────────────────────────────
+# ── Staging via execute_values (batch unique) ───────────────────────────────
 
 def _upsert_staging_fast(conn, all_dfs: list[pd.DataFrame]) -> int:
     """
@@ -241,24 +163,21 @@ def _upsert_staging_fast(conn, all_dfs: list[pd.DataFrame]) -> int:
 
 # ── Endpoint principal ─────────────────────────────────────────────────────
 
-@router.post("/ingest_fast", response_model=IngestFastResponse, summary="Ingestion optimisée (≥30% plus rapide)")
+@router.post("/ingest_fast", response_model=IngestFastResponse, summary="Ingestion optimisée")
 def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
     """
     Pipeline d'ingestion **optimisé** avec :
     - Téléchargement **parallèle** (ThreadPoolExecutor, 8 workers)
-    - **Cache Redis** (skip les tickers déjà ingérés dans les 5 min)
-    - Indicateurs techniques **vectorisés NumPy** (pas de boucles Python)
     - Upload MinIO en **parallèle**
     - Indexation ES en **bulk unique**
     - Staging via **execute_values** (batch unique)
 
-    Objectif : ≥30% plus rapide que `/ingest` pour les mêmes données.
+    Objectif : accélérer l'ingestion sans changer le contrat métier.
     """
     tickers     = body.data.get("tickers", [])
     period      = body.data.get("period", "1mo")
     run_staging = body.data.get("run_staging", True)
     run_curated = body.data.get("run_curated", True)
-    use_cache   = body.data.get("use_cache", False)
 
     if not tickers:
         raise HTTPException(status_code=422, detail="Le champ 'tickers' est requis")
@@ -270,8 +189,6 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
     pipeline_steps: dict = {}
     optimizations = {
         "parallel_download":    True,
-        "redis_cache_hits":     0,
-        "vectorized_indicators": True,
         "bulk_es_indexing":     True,
         "execute_values_pg":    True,
     }
@@ -279,34 +196,23 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
 
     # ── Étape 1 : Raw parallèle ───────────────────────────────────────────
     t0 = time.perf_counter()
-    redis_client = get_redis()
-
-    # Séparer les tickers cachés des non-cachés
-    cached_tickers = [t for t in tickers if use_cache and _is_cached(redis_client, t, period)]
-    cached_set = set(cached_tickers)
-    to_fetch_tickers = [t for t in tickers if t not in cached_set]
-    optimizations["redis_cache_hits"] = len(cached_tickers)
 
     downloaded_dfs: dict[str, pd.DataFrame] = {}
 
     # Téléchargement parallèle
     with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
-        futures = {pool.submit(_download_one, t, period): t for t in to_fetch_tickers}
+        futures = {pool.submit(_download_one, t, period): t for t in tickers}
         for future in as_completed(futures):
             ticker, df, error = future.result()
             if error:
                 all_errors.append({"ticker": ticker, "step": "raw", "error": error})
             else:
                 downloaded_dfs[ticker] = df
-                _set_cache(redis_client, ticker, period)
 
     # Upload MinIO en parallèle
     if downloaded_dfs:
-        from ingestion.ingest_file import get_minio_client, get_es_client, ensure_es_index
-        from elasticsearch import helpers as es_helpers
-
         minio_client = get_minio_client()
-        es           = get_es_client()
+        es = get_es_client()
         ensure_es_index(es)
 
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as pool:
@@ -327,7 +233,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
             for _, row in df.iterrows():
                 es_actions.append({
                     "_index": "raw_financial_events",
-                    "_id":    f"{ticker}_{row['date']}",
+                    "_id":    raw_document_id("yfinance_fast", ticker, row['date']),
                     "_source": {
                         "ticker":      ticker,
                         "date":        row["date"],
@@ -347,24 +253,21 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
     raw_duration_ms = int((time.perf_counter() - t0) * 1000)
     pipeline_steps["raw"] = {
         "downloaded":  len(downloaded_dfs),
-        "cache_hits":  len(cached_tickers),
         "errors":      sum(1 for e in all_errors if e.get("step") == "raw"),
         "duration_ms": raw_duration_ms,
     }
 
-    # ── Étape 2 : Staging vectorisé ───────────────────────────────────────
+    # ── Étape 2 : Staging ───────────────────────────────────────────────
     staged_dfs: list[pd.DataFrame] = []
     if run_staging and downloaded_dfs:
         t0 = time.perf_counter()
         try:
             conn = get_pg_conn()
-            # Indicateurs vectorisés sur tous les DataFrames
+            # Calcul des indicateurs via helper partagé
             enriched_dfs = []
             for ticker, df in downloaded_dfs.items():
                 try:
-                    df = df.copy()
-                    df["date"] = pd.to_datetime(df["date"])
-                    df = compute_indicators_vectorized(df)
+                    df = prepare_staging_dataframe(df)
                     enriched_dfs.append(df)
                     staged_dfs.append(df)
                 except Exception as exc:
@@ -424,7 +327,6 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
             "total_duration_ms": total_duration_ms,
             "batch_size":        len(tickers),
             "ms_per_ticker":     round(total_duration_ms / len(tickers), 2) if tickers else 0,
-            "cache_hits":        len(cached_tickers),
         },
         optimizations=optimizations,
         errors=all_errors,

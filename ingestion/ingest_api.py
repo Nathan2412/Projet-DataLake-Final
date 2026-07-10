@@ -25,6 +25,7 @@ from config.settings import (
     ES_URL, ES_INDEX_RAW,
     ALL_TICKERS,
 )
+from ingestion.ingest_file import raw_document_id
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -115,7 +116,7 @@ def index_api_data_to_es(es: Elasticsearch, payload: dict) -> int:
     actions = [
         {
             "_index": ES_INDEX_RAW,
-            "_id":    f"{ticker}_{record['date']}_api",
+            "_id":    raw_document_id("yfinance_api", ticker, record['date']),
             "_source": {
                 "ticker":      ticker,
                 "date":        record["date"],
