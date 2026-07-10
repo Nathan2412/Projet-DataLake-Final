@@ -37,7 +37,7 @@ def get_pg_conn():
     return psycopg2.connect(**POSTGRES)
 
 
-# ── Chargement depuis Staging ──────────────────────────────────────────────
+# Chargement depuis Staging
 
 def load_from_staging(conn, ticker: str) -> pd.DataFrame:
     """Charge les données de staging_ohlcv pour un ticker."""
@@ -55,7 +55,7 @@ def load_from_staging(conn, ticker: str) -> pd.DataFrame:
     return df
 
 
-# ── Détection d'anomalies ──────────────────────────────────────────────────
+# Détection d'anomalies
 
 def compute_volume_zscore(volume: pd.Series) -> pd.Series:
     """Z-score glissant du volume (fenêtre 20 jours)."""
@@ -161,7 +161,7 @@ def compute_signal(row: pd.Series) -> str:
     return "hold"
 
 
-# ── Écriture dans curated ──────────────────────────────────────────────────
+# Écriture dans Curated
 
 def upsert_to_curated(conn, df: pd.DataFrame) -> int:
     """Upsert les données enrichies dans curated_analysis."""
@@ -220,7 +220,7 @@ def upsert_to_curated(conn, df: pd.DataFrame) -> int:
     return len(records)
 
 
-# ── Point d'entrée ─────────────────────────────────────────────────────────
+# Point d'entrée
 
 def run_curated(tickers: list[str]) -> dict:
     """Transforme les données Staging → Curated avec détection d'anomalies."""

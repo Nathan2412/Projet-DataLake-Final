@@ -159,7 +159,7 @@ def main() -> None:
     parser.add_argument("--period", default="5d")
     parser.add_argument("--timeout", type=int, default=1800)
     parser.add_argument("--repeats", type=int, default=3)
-    parser.add_argument("--output", default="benchmarks/benchmark_results.json")
+    parser.add_argument("--output", default="livrables/benchmark_ingest_vs_ingest_fast.json")
     args = parser.parse_args()
 
     report = benchmark(

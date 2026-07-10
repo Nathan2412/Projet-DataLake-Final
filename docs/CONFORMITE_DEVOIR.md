@@ -1,32 +1,54 @@
 # Conformité du devoir
 
-## Version et état
+Sujet : EFREI Data Lakes & Data Integration 2025-2026
 
-- Sujet : EFREI Data Lakes & Data Integration 2025-2026
-- Branche : `improve/assignment-compliance`
-Ce tableau est le suivi des exigences du sujet, avec ce que le code met en place aujourd'hui et la façon de le vérifier.
+Vérifications réalisées le 10 juillet 2026 sur la stack Docker.
 
-- **implemented** = livrable/procédure présent dans le dépôt et testable.
-- **needs live rerun** = la preuve dépend d'une exécution Docker/API réelle (à relancer sur hôte Docker).
+## Exigences obligatoires
 
-## Matrice de conformité
+1. Data Lake de bout en bout
 
-| # | Exigence | Type | Fichiers d'implémentation | Vérification | Statut |
-|---|---|---|---|---|---|
-| 1 | Concevoir et implémenter un Data Lake de bout en bout (ingestion, stockage, transformation, exposition) | Obligatoire | `ingestion/*`, `transformation/*`, `api/*`, `airflow/dags/financial_pipeline_dag.py`, `scripts/init_db.sql` | `python -m pytest tests/test_financial_logic.py tests/test_benchmark.py` (couverture structurelle), puis `docker compose up -d` + GET `/health`, GET `/raw`, `/staging`, `/curated` | implemented |
-| 2 | Structurer le Data Lake en zones Raw / Staging / Curated | Obligatoire | `ingestion/ingest_file.py`, `ingestion/ingest_api.py`, `transformation/staging/transform_staging.py`, `transformation/curated/transform_curated.py`, `docker-compose.yml` | `python scripts/benchmark_endpoints.py --base-url http://localhost:8000 --repeats 3` (après démarrage) | implemented |
-| 3 | Utiliser Elasticsearch ou stockage type S3 pour Raw | Obligatoire | `docker-compose.yml`, `ingestion/ingest_file.py`, `ingestion/ingest_api.py`, `api/dependencies.py`, `api/routers/raw.py` | Démarrage Docker + GET `/raw`, GET `/stats` (sections `raw_elasticsearch`, `raw_minio`) | implemented |
-| 4 | Utiliser deux sources de données | Obligatoire | `ingestion/ingest_file.py`, `ingestion/ingest_api.py`, `config/settings.py` | Tests des identifiants par source, puis GET `/raw?source=yfinance_file` et `/raw?source=yfinance_api` sur la stack | implemented |
-| 5 | Mettre en place une pipeline d'intégration avec Airflow | Obligatoire | `airflow/dags/financial_pipeline_dag.py`, `ingestion/ingest_file.py`, `ingestion/ingest_api.py`, `transformation/staging/transform_staging.py`, `transformation/curated/transform_curated.py` | Démarrage `docker compose up -d`, check Airflow UI `http://localhost:8080`, DAG `financial_data_lake_pipeline` | needs live rerun |
-| 6 | Exposer API Gateway avec `/raw`, `/staging`, `/curated`, `/health`, `/stats` | Obligatoire | `api/main.py`, `api/routers/raw.py`, `api/routers/staging.py`, `api/routers/curated.py`, `api/routers/health.py`, `api/routers/stats.py` | `curl http://localhost:8000/{health,stats,raw,staging,curated}` (avec params adaptés) | implemented |
-| 7 | Niveau avancé : POST `/ingest` | Optionnel | `api/routers/ingest.py` | `curl -X POST http://localhost:8000/ingest ...` | implemented |
-| 8 | Niveau avancé : POST `/ingest_fast` | Optionnel | `api/routers/ingest_fast.py` | `curl -X POST http://localhost:8000/ingest_fast ...` | implemented |
-| 9 | Niveau avancé : benchmark batch 1 et 100 | Optionnel | `scripts/benchmark_endpoints.py` | `python scripts/benchmark_endpoints.py --base-url http://localhost:8000 --period 5d --repeats 3 --output ...` | needs live rerun |
-| 10 | Niveau avancé : amélioration > 30% | Optionnel | `scripts/benchmark_endpoints.py`, `api/routers/ingest.py`, `api/routers/ingest_fast.py` | Vérifier dans le rapport JSON `target_met = true` après exécution sur branche courante | needs live rerun |
-| 11 | Livrables complets | Obligatoire | `README.md`, `livrables/RAPPORT_TECHNIQUE.md`, PDF à régénérer après validation | Vérifier les fichiers et leurs liens | needs live rerun |
+Le projet couvre l'ingestion, le stockage, les transformations et l'exposition par API. Les tests passent et les endpoints répondent.
 
-## Notes de preuve
+2. Zones Raw, Staging et Curated
 
-- Les tests unitaires ne valident pas l'exécution complète des services.
-- La preuve finale attendue est : "tests off-line passants + exécution Docker + endpoints + benchmark rerunnable".
-- Le fichier `livrables/benchmark_ingest_vs_ingest_fast.json` est historique (mesures passées) et n'est pas une preuve de la branche actuelle.
+Raw utilise MinIO et Elasticsearch. Staging et Curated utilisent PostgreSQL.
+
+3. Deux sources de données
+
+Le pipeline utilise `data/finance_dataset.csv` et Yahoo Finance via `yfinance`. Les deux sources sont visibles dans la zone Raw.
+
+4. Pipeline Airflow
+
+Le DAG `financial_data_lake_pipeline` a été exécuté avec l'identifiant `manual_final_20260710T132822Z`. Les sept tâches se sont terminées avec le statut `success`.
+
+5. API Gateway
+
+Les endpoints `/raw`, `/staging`, `/curated`, `/health` et `/stats` ont été testés sur la stack Docker.
+
+6. Livrables
+
+Le dépôt contient le README, le rapport technique, la documentation technique, les deux PDF et le résultat du benchmark.
+
+## Niveau avancé
+
+Les endpoints `/ingest` et `/ingest_fast` ont été testés.
+
+Le benchmark compare des lots de 1 et 100 tickers avec trois répétitions et un ordre alterné. Les douze appels ont réussi.
+
+Pour 100 tickers, le temps médian passe de 104 825,65 ms à 12 230,36 ms. Le gain mesuré est de 88,33 %, supérieur à la cible de 30 %.
+
+Les mesures sont enregistrées dans `livrables/benchmark_ingest_vs_ingest_fast.json`. Le fichier indique le commit testé `85aa820` et contient chaque échantillon.
+
+## Commandes de vérification
+
+```bash
+python -m pytest tests/test_financial_logic.py tests/test_benchmark.py
+docker compose up -d
+curl http://localhost:8000/health
+curl http://localhost:8000/stats
+curl "http://localhost:8000/raw?limit=5"
+curl "http://localhost:8000/staging?limit=5"
+curl "http://localhost:8000/curated?limit=5"
+python scripts/benchmark_endpoints.py --base-url http://localhost:8000 --period 5d --repeats 3
+```

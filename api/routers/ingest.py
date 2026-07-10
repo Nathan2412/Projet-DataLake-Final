@@ -41,7 +41,7 @@ class IngestResponse(BaseModel):
 @router.post("/ingest", response_model=IngestResponse, summary="Ingestion synchrone avec benchmark")
 def ingest(body: IngestRequest) -> IngestResponse:
     """
-    Lance le pipeline complet d'ingestion de façon **séquentielle** pour un batch de tickers.
+    Lance le pipeline d'ingestion séquentiel pour un lot de tickers.
 
     Steps :
     1. Téléchargement yfinance → MinIO + Elasticsearch (zone Raw)
@@ -66,7 +66,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
     all_errors: list[dict] = []
     t_global_start = time.perf_counter()
 
-    # ── Étape 1 : Ingestion Raw ───────────────────────────────────────────
+    # Étape 1 : Raw
     t0 = time.perf_counter()
     raw_results = {"success": [], "errors": []}
     try:
@@ -98,7 +98,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
         "duration_ms": raw_duration_ms,
     }
 
-    # ── Étape 2 : Staging ─────────────────────────────────────────────────
+    # Étape 2 : Staging
     staging_results: dict = {"success": [], "errors": []}
     if run_staging:
         t0 = time.perf_counter()
@@ -117,7 +117,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
             "duration_ms": staging_duration_ms,
         }
 
-    # ── Étape 3 : Curated ─────────────────────────────────────────────────
+    # Étape 3 : Curated
     curated_results: dict = {"success": [], "errors": []}
     if run_curated and run_staging:
         t0 = time.perf_counter()
@@ -137,7 +137,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
             "duration_ms":        curated_duration_ms,
         }
 
-    # ── Log d'ingestion ───────────────────────────────────────────────────
+    # Journal d'ingestion
     total_duration_ms = int((time.perf_counter() - t_global_start) * 1000)
     try:
         conn = get_pg_conn()

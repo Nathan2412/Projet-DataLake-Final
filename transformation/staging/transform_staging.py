@@ -34,7 +34,7 @@ def get_es_client() -> Elasticsearch:
     return Elasticsearch(ES_URL)
 
 
-# ── Indicateurs techniques ─────────────────────────────────────────────────
+# Indicateurs techniques
 
 def calc_sma(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window=window, min_periods=1).mean()
@@ -109,7 +109,7 @@ def prepare_staging_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 
 
 
-# ── Récupération des données Raw depuis ES ─────────────────────────────────
+# Lecture des données Raw depuis Elasticsearch
 
 def fetch_raw_from_es(es: Elasticsearch, ticker: str) -> pd.DataFrame:
     """Récupère toutes les données brutes d'un ticker depuis Elasticsearch."""
@@ -131,7 +131,7 @@ def fetch_raw_from_es(es: Elasticsearch, ticker: str) -> pd.DataFrame:
     return prepared
 
 
-# ── Écriture dans PostgreSQL ───────────────────────────────────────────────
+# Écriture dans PostgreSQL
 
 def upsert_to_staging(conn, df: pd.DataFrame) -> int:
     """Upsert les données dans staging_ohlcv."""
@@ -207,7 +207,7 @@ def upsert_to_staging(conn, df: pd.DataFrame) -> int:
     return len(records)
 
 
-# ── Point d'entrée ─────────────────────────────────────────────────────────
+# Point d'entrée
 
 def run_staging(tickers: list[str]) -> dict:
     """Transforme et charge les données de la zone Raw vers Staging."""

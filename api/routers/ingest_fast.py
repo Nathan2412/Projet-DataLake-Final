@@ -1,5 +1,5 @@
 """
-Endpoint POST /ingest_fast : ingestion optimisée.
+Endpoint POST /ingest_fast : ingestion parallèle.
 
 Optimisations appliquées :
 1. Parallélisation du téléchargement yfinance via ThreadPoolExecutor
@@ -29,7 +29,7 @@ router = APIRouter()
 MAX_WORKERS       = 8     # threads pour le download parallèle
 
 
-# ── Modèles Pydantic ───────────────────────────────────────────────────────
+# Modèles Pydantic
 
 class IngestFastRequest(BaseModel):
     data: dict = Field(
@@ -53,10 +53,10 @@ class IngestFastResponse(BaseModel):
     timestamp:       str
 
 
-# ── Téléchargement parallèle ───────────────────────────────────────────────
+# Téléchargement parallèle
 
 def _download_one(ticker: str, period: str) -> tuple[str, Optional[pd.DataFrame], Optional[str]]:
-    """Télécharge un ticker — exécuté dans un thread du pool."""
+    """Télécharge un ticker dans un thread du pool."""
     try:
         import yfinance as yf
         df = yf.download(ticker, period=period, interval="1d", progress=False, auto_adjust=False)
@@ -76,7 +76,7 @@ def _download_one(ticker: str, period: str) -> tuple[str, Optional[pd.DataFrame]
 
 
 def _upload_minio_one(minio_client, ticker: str, df: pd.DataFrame) -> None:
-    """Upload MinIO — exécuté en parallèle dans un thread du pool."""
+    """Envoie un fichier dans MinIO depuis un thread du pool."""
     import io
     from dependencies import BUCKET_RAW_FILE
     csv_bytes   = df.to_csv(index=False).encode("utf-8")
@@ -90,7 +90,7 @@ def _upload_minio_one(minio_client, ticker: str, df: pd.DataFrame) -> None:
 
 
 
-# ── Staging via execute_values (batch unique) ───────────────────────────────
+# Staging avec execute_values
 
 def _upsert_staging_fast(conn, all_dfs: list[pd.DataFrame]) -> int:
     """
@@ -161,16 +161,16 @@ def _upsert_staging_fast(conn, all_dfs: list[pd.DataFrame]) -> int:
     return len(all_records)
 
 
-# ── Endpoint principal ─────────────────────────────────────────────────────
+# Endpoint principal
 
-@router.post("/ingest_fast", response_model=IngestFastResponse, summary="Ingestion optimisée")
+@router.post("/ingest_fast", response_model=IngestFastResponse, summary="Ingestion parallèle")
 def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
     """
-    Pipeline d'ingestion **optimisé** avec :
-    - Téléchargement **parallèle** (ThreadPoolExecutor, 8 workers)
-    - Upload MinIO en **parallèle**
-    - Indexation ES en **bulk unique**
-    - Staging via **execute_values** (batch unique)
+    Pipeline d'ingestion parallèle :
+    - téléchargement avec ThreadPoolExecutor ;
+    - envoi des fichiers dans MinIO en parallèle ;
+    - indexation Elasticsearch groupée ;
+    - insertion Staging avec execute_values.
 
     Objectif : accélérer l'ingestion sans changer le contrat métier.
     """
@@ -194,7 +194,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
     }
     t_global_start = time.perf_counter()
 
-    # ── Étape 1 : Raw parallèle ───────────────────────────────────────────
+    # Étape 1 : Raw
     t0 = time.perf_counter()
 
     downloaded_dfs: dict[str, pd.DataFrame] = {}
@@ -257,7 +257,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
         "duration_ms": raw_duration_ms,
     }
 
-    # ── Étape 2 : Staging ───────────────────────────────────────────────
+    # Étape 2 : Staging
     staged_dfs: list[pd.DataFrame] = []
     if run_staging and downloaded_dfs:
         t0 = time.perf_counter()
@@ -285,7 +285,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
             "duration_ms": staging_duration_ms,
         }
 
-    # ── Étape 3 : Curated ─────────────────────────────────────────────────
+    # Étape 3 : Curated
     if run_curated and staged_dfs:
         t0 = time.perf_counter()
         staged_tickers = [df["ticker"].iloc[0] for df in staged_dfs if not df.empty]
@@ -305,7 +305,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
             "duration_ms":        curated_duration_ms,
         }
 
-    # ── Log + réponse ─────────────────────────────────────────────────────
+    # Journal et réponse
     total_duration_ms = int((time.perf_counter() - t_global_start) * 1000)
     try:
         conn = get_pg_conn()

@@ -5,9 +5,9 @@ Orchestration complète : Raw → Staging → Curated
 Scheduling : quotidien à 6h UTC (après ouverture des marchés européens)
 
 Flux :
-  [ingest_file] ──┐
-                  ├──▶ [transform_staging] ──▶ [transform_curated] ──▶ [notify_done]
-  [ingest_api]  ──┘
+  [ingest_file] --|
+                  +--> [transform_staging] --> [transform_curated] --> [notify_done]
+  [ingest_api]  --|
 """
 import sys
 import os
@@ -35,7 +35,7 @@ DEFAULT_ARGS = {
 }
 
 
-# ── Callables pour les PythonOperators ────────────────────────────────────
+# Fonctions appelées par les PythonOperators
 
 def task_ingest_file(**context) -> dict:
     """Ingère le dataset fichier complet (tickers S&P500 + indices)."""
@@ -124,7 +124,7 @@ def task_log_pipeline_summary(**context) -> None:
     log.info("=== PIPELINE SUMMARY ===\n%s", json.dumps(summary, indent=2))
 
 
-# ── Définition du DAG ─────────────────────────────────────────────────────
+# Définition du DAG
 
 with DAG(
     dag_id="financial_data_lake_pipeline",

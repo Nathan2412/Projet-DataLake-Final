@@ -18,9 +18,7 @@ x-airflow-common: &airflow-common
     MINIO_SECRET_KEY: minioadmin
     ES_HOST: elasticsearch
     ES_PORT: 9200
-    REDIS_HOST: redis
-    REDIS_PORT: 6379
-    _PIP_ADDITIONAL_REQUIREMENTS: "yfinance==0.2.66 multitasking==0.0.11 pandas numpy scikit-learn boto3 minio==7.2.3 elasticsearch redis psycopg2-binary requests"
+    _PIP_ADDITIONAL_REQUIREMENTS: "yfinance==0.2.66 multitasking==0.0.11 pandas numpy scikit-learn boto3 minio==7.2.3 elasticsearch psycopg2-binary requests"
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
@@ -36,7 +34,7 @@ x-airflow-common: &airflow-common
     - datalake-net
 
 services:
-  # ── PostgreSQL (Airflow metadata + Staging + Curated) ──────────────────────
+  # PostgreSQL : Airflow, Staging et Curated
   postgres:
     image: postgres:15
     environment:
@@ -55,7 +53,7 @@ services:
     networks:
       - datalake-net
 
-  # ── MinIO (Zone Raw – S3 compatible) ──────────────────────────────────────
+  # MinIO : zone Raw, stockage S3
   minio:
     image: minio/minio:latest
     command: server /data --console-address ":9001"
@@ -75,7 +73,7 @@ services:
     networks:
       - datalake-net
 
-  # ── MinIO bucket init ──────────────────────────────────────────────────────
+  # Création des buckets MinIO
   minio-init:
     image: minio/mc:latest
     depends_on:
@@ -91,7 +89,7 @@ services:
     networks:
       - datalake-net
 
-  # ── Elasticsearch (Zone Raw – indexation) ─────────────────────────────────
+  # Elasticsearch : index Raw
   elasticsearch:
     image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
     environment:
@@ -110,19 +108,8 @@ services:
     networks:
       - datalake-net
 
-  # ── Redis (cache pour /ingest_fast) ───────────────────────────────────────
-  redis:
-    image: redis:7-alpine
-    ports:
-      - "6379:6379"
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      retries: 5
-    networks:
-      - datalake-net
 
-  # ── Airflow Init ──────────────────────────────────────────────────────────
+  # Initialisation Airflow
   airflow-init:
     <<: *airflow-common
     entrypoint: /bin/bash
@@ -142,7 +129,7 @@ services:
     networks:
       - datalake-net
 
-  # ── Airflow Webserver ─────────────────────────────────────────────────────
+  # Interface Airflow
   airflow-webserver:
     <<: *airflow-common
     command: webserver
@@ -159,7 +146,7 @@ services:
     networks:
       - datalake-net
 
-  # ── Airflow Scheduler ─────────────────────────────────────────────────────
+  # Planificateur Airflow
   airflow-scheduler:
     <<: *airflow-common
     command: scheduler
@@ -169,7 +156,7 @@ services:
     networks:
       - datalake-net
 
-  # ── API Gateway (FastAPI) ─────────────────────────────────────────────────
+  # API FastAPI
   api:
     build:
       context: .
@@ -188,16 +175,12 @@ services:
       MINIO_SECRET_KEY: minioadmin
       ES_HOST: elasticsearch
       ES_PORT: 9200
-      REDIS_HOST: redis
-      REDIS_PORT: 6379
     depends_on:
       postgres:
         condition: service_healthy
       minio:
         condition: service_healthy
       elasticsearch:
-        condition: service_healthy
-      redis:
         condition: service_healthy
     networks:
       - datalake-net

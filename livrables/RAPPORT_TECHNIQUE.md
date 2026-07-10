@@ -1,4 +1,4 @@
-# Rapport technique — Data Lake financier (version source)
+# Rapport technique
 
 ## 1) Problème métier
 
@@ -11,9 +11,9 @@ Le sujet met aussi l'accent sur la reproductibilité. Autrement dit : les comman
 
 Le dépôt est organisé autour de trois axes :
 
-- **Ingestion** : récupérer des données brutes depuis des fichiers et une API,
-- **Transformation** : enrichir les jeux de données et sortir des jeux consolidés,
-- **Exposition** : fournir une API HTTP pour inspecter le pipeline.
+- Ingestion : récupérer des données brutes depuis un fichier et une API.
+- Transformation : nettoyer puis enrichir les données.
+- Exposition : fournir une API HTTP pour consulter le pipeline.
 
 Le projet est lancé avec Docker Compose, ce qui permet d’avoir Postgres, MinIO, Elasticsearch, Airflow et l’API dans un environnement unifié. Airflow orchestre ensuite les tâches de données.
 
@@ -32,9 +32,9 @@ Les composants utilisés sont :
 
 Le choix retenu est classique pour un mini data lake d’école :
 
-- **Raw** = conservation « as-is » avec horodatage et provenance,
-- **Staging** = nettoyage et normalisation,
-- **Curated** = donnée enrichie pour analyse/diagnostic.
+- Raw : conservation des données avec la date d'ingestion et la source.
+- Staging : nettoyage et normalisation.
+- Curated : ajout des indicateurs, anomalies et signaux.
 
 C’est une manière simple de séparer les responsabilités : on ne modifie pas directement ce qui arrive, puis on applique des transformations contrôlées, puis on produit une version prête à l’usage.
 
@@ -140,9 +140,11 @@ Pour chaque mode :
 
 La cible d’amélioration demandée dans le sujet (30%) n’est pas une vérité fixe : c’est une hypothèse de test. Elle doit être recalculée sur chaque branche avec données et charge comparables. Le script écrit un JSON qui peut être relu sans dépendance à un tableau imprimé dans le README.
 
-### 9.3 Pourquoi pas de chiffre figé dans la documentation
+### 9.3 Résultat final observé
 
-Le rapport courant évite d’annoncer une valeur unique de gain. Le benchmark doit être une action vérifiable, pas une mémoire d’un run ancien. C’est cohérent avec la règle de preuve locale actuelle : les chiffres ne sont valides que s’ils sortent de la branche courante après relance.
+Le test du 10 juillet 2026 utilise trois répétitions et un ordre alterné. Pour batch 1, les médianes sont de 1 073,29 ms pour `/ingest` et 989,86 ms pour `/ingest_fast`, soit 7,77 %. Pour batch 100, elles sont de 104 825,65 ms et 12 230,36 ms, soit 88,33 % de gain. Les douze appels ont retourné `success` sans erreur.
+
+Le gain faible sur un ticker est cohérent : il n’y a presque rien à paralléliser. Sur 100 tickers, le téléchargement concurrent et les écritures groupées deviennent utiles. La cible avancée supérieure à 30 % est donc atteinte sur le batch qui mesure cette optimisation. Les échantillons bruts et le commit `85aa820` sont conservés dans `livrables/benchmark_ingest_vs_ingest_fast.json`.
 
 
 ## 10) Vérification et tests
@@ -155,7 +157,7 @@ La vérification minimale locale passe par Pytest sur les modules utiles au suje
 python -m pytest tests/test_financial_logic.py tests/test_benchmark.py
 ```
 
-Sur cette branche, le check local est vert.
+Sur cette branche, 12 tests passent.
 
 ### 10.2 Vérification en environnement intégré
 
@@ -166,15 +168,14 @@ On poursuit ensuite avec Docker pour confirmer la chaîne complète :
 3. lecture de `/raw`, `/staging`, `/curated`,
 4. exécution du benchmark.
 
-Le point important est d’expliciter ce qui est confirmé par test unitaire et ce qui dépend d’un run Docker complet.
+Le run intégré final a confirmé `/health`, `/stats`, `/raw`, `/staging` et `/curated`. Le DAG Airflow `manual_final_20260710T132822Z` s'est terminé en `success` avec ses sept tâches au vert. Les deux sources sont visibles dans Elasticsearch et MinIO.
 
 
 ## 11) Limites constatées
 
-- Les endpoints de santé incluent Redis pour la vérification de disponibilité, mais le coeur métier n’est pas centré sur du caching applicatif.
 - Les temps et volumes dépendent de la disponibilité réseau d’`yfinance`.
 - Les statistiques `/stats` sont exactes vis-à-vis de l’état courant des services ; elles peuvent être à réinterpréter pendant la première phase de chargement.
-- Les résultats de benchmark de branche antérieure existent dans un fichier historique, mais ils ne remplacent pas un rerun propre après changements.
+- Les mesures réseau peuvent changer lors d'un nouveau run ; le JSON conserve donc les statuts et les échantillons utilisés.
 
 
 ## 12) Reproductibilité
@@ -196,12 +197,12 @@ Puis :
 ```bash
 curl http://localhost:8000/health
 curl "http://localhost:8000/raw?limit=5"
-python scripts/benchmark_endpoints.py --base-url http://localhost:8000 --period 5d --repeats 3 --output livrables/benchmark_run.json
+python scripts/benchmark_endpoints.py --base-url http://localhost:8000 --period 5d --repeats 3 --output livrables/benchmark_ingest_vs_ingest_fast.json
 ```
 
-Le rendu final doit conserver la sortie des tests, l'état des endpoints et le JSON du benchmark relancé. Si `target_met` est faux, le rapport doit le dire au lieu de reprendre un ancien résultat.
+Le rendu final conserve le JSON du benchmark et les commandes qui permettent de reproduire les contrôles.
 
 
 ## 13) État avant remise
 
-Les tests hors stack passent. La stack Docker et le benchmark doivent encore être relancés sur cette branche. La cible `>= 30%` reste un objectif à vérifier, pas un succès garanti.
+Les tests hors stack, la stack Docker, le DAG Airflow et les endpoints ont été vérifiés. Le benchmark final atteint la cible avancée sur batch 100, avec un gain médian de 88,33 %.

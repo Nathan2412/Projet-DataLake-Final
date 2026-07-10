@@ -4,8 +4,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable, List
 
@@ -26,21 +24,7 @@ REPORT_PDF = ROOT / "livrables" / "Rapport_DataLake_Finance_Artemiy_Smogunov_Nat
 TECH_PDF = ROOT / "livrables" / "Documentation_Technique_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf"
 
 GROUP_NAMES = ["Artemiy Smogunov", "Nathan Smadja-Tubiana", "Patrice Ignongui"]
-TITLE = "Data Lake financier – Démo technique"
-
-
-def current_branch() -> str:
-    try:
-        return subprocess.check_output([
-            "git",
-            "-C",
-            str(ROOT),
-            "rev-parse",
-            "--abbrev-ref",
-            "HEAD",
-        ], text=True).strip()
-    except Exception:
-        return "unknown"
+TITLE = "Projet EFREI 2025-2026"
 
 
 def escape_html(text: str) -> str:
@@ -49,6 +33,7 @@ def escape_html(text: str) -> str:
 
 def md_inline(text: str) -> str:
     text = escape_html(text)
+    text = re.sub(r"\[([^]]+)\]\([^)]+\)", r"\1", text)
     text = re.sub(r"\*\*(.+?)\*\*", r"<b>\1</b>", text)
     text = re.sub(r"`([^`]+)`", r"<font name='Courier'>\1</font>", text)
     return text
@@ -119,17 +104,13 @@ def add_paragraphs(text: str, st: dict[str, ParagraphStyle], story: list) -> Non
 
 
 
-def title_page(st: dict[str, ParagraphStyle], story: list, kind: str, branch: str) -> None:
-    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+def title_page(st: dict[str, ParagraphStyle], story: list, kind: str) -> None:
     story.extend([
         Spacer(1, 2 * cm),
         Paragraph(kind, st["title"]),
         Paragraph("Data Lake financier", st["subtitle"]),
         Spacer(1, 1.2 * cm),
         Paragraph(f"Groupe : {', '.join(GROUP_NAMES)}", st["body"]),
-        Paragraph(f"Branche : {branch}", st["body"]),
-        Spacer(1, 0.6 * cm),
-        Paragraph(f"Généré le : {generated_at}", st["body"]),
         Spacer(1, 1.2 * cm),
         Paragraph(TITLE, st["subtitle"]),
         PageBreak(),
@@ -139,13 +120,13 @@ def title_page(st: dict[str, ParagraphStyle], story: list, kind: str, branch: st
 def generate_pdf(output: Path, sources: Iterable[Path], section_title: str) -> None:
     st = styles()
     story: list = []
-    title_page(st, story, section_title, current_branch())
+    title_page(st, story, section_title)
 
     for idx, path in enumerate(sources):
         if idx:
             story.append(PageBreak())
         content = path.read_text(encoding="utf-8")
-        add_paragraphs(f"# Source: {path.as_posix()}\n\n{content}", st, story)
+        add_paragraphs(content, st, story)
 
     doc = SimpleDocTemplate(
         str(output),
