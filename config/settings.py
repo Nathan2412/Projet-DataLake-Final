@@ -48,4 +48,3 @@ ALL_TICKERS   = SP500_TICKERS + INDEX_TICKERS
 # Paramètres d'ingestion
 DEFAULT_PERIOD     = "2y"    # historique initial
 DEFAULT_INTERVAL   = "1d"    # granularité journalière
-API_FETCH_INTERVAL = "@daily"  # scheduling Airflow

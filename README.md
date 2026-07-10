@@ -1,204 +1,236 @@
-# Financial Data Lake (Projet EFREI 2025-2026)
+# Data Lake financier
 
-Projet final du cours *Data Lakes & Data Integration*.
+Projet final du cours Data Lakes & Data Integration, EFREI 2025-2026.
 
-## Groupe
+Auteurs :
 
 - Artemiy Smogunov
 - Nathan Smadja-Tubiana
 - Patrice Ignongui
 
-## Lien du sujet
+Le sujet est disponible dans `consignes/Data_Lakes_Projet_Final_EFREI_2025-2026.pdf`.
 
-- Sujet : [Data_Lakes_Projet_Final_EFREI_2025-2026.pdf](consignes/Data_Lakes_Projet_Final_EFREI_2025-2026.pdf)
-- Récapitulatif des règles : [resume_regles_devoir.txt](consignes/resume_regles_devoir.txt)
+## Fonctionnement du projet
 
-## Ce que couvre ce dépôt
+Le projet collecte des cours financiers journaliers depuis deux sources :
 
-Ce projet met en place un mini data lake financier avec deux sources de données, trois zones (Raw / Staging / Curated), une API d’exposition, et une orchestration planifiée.
+- le fichier versionné `data/finance_dataset.csv` ;
+- Yahoo Finance, interrogé avec la bibliothèque `yfinance`.
 
-- Sources utilisées :
-  - `data/finance_dataset.csv` (fichier local)
-  - API Yahoo Finance via `yfinance`
-
-- Zone Raw : `MinIO` (S3 compatible) et `Elasticsearch`
-- Zones Staging et Curated : `PostgreSQL`
-- Orchestration : `Apache Airflow`
-- API : `FastAPI`
-
-## Architecture (vue courte)
+Les données passent par trois zones.
 
 ```text
-Sources (CSV local, yfinance)
-   |-- ingestion_file.py --|
-   `-- ingestion_api.py  ---+--> Raw : MinIO (objets CSV/JSON) + Elasticsearch
-                            `--> Airflow DAG
-                                 |
-                                 v
-                Staging : PostgreSQL (staging_ohlcv)
-                                 |
-                                 v
-                Curated : PostgreSQL (curated_analysis)
-                                 |
-                                 v
-                FastAPI : /raw, /staging, /curated, /health, /stats
-                                 |
-                                 `--> endpoints avancés /ingest, /ingest_fast
+Fichier CSV ---------|
+                     |--> Raw --> Staging --> Curated --> FastAPI
+Yahoo Finance -------|
+                         Airflow orchestre ce flux
 ```
 
-## Correspondance avec le devoir
+Raw conserve les données reçues dans MinIO et les indexe dans Elasticsearch. Staging nettoie les lignes et calcule les indicateurs techniques dans PostgreSQL. Curated détecte les anomalies, calcule une tendance et produit un signal simplifié dans PostgreSQL.
 
-| Exigence | Mise en œuvre | Preuve principale |
-|---|---|---|
-| Conception d'un data lake complet | `ingestion/`, `transformation/`, `api/`, `airflow/` | README + code + scripts SQL |
-| Structure Raw / Staging / Curated | `ingestion/`, `transformation/staging/`, `transformation/curated/` | `scripts/init_db.sql`, requêtes de `api/routers` |
-| Stockage raw compatible S3 + Elasticsearch | `ingestion/ingest_file.py`, `ingestion/ingest_api.py`, `docker-compose.yml`, `api/dependencies.py` | index/métadonnées dans ES, objets MinIO |
-| Ingestion depuis 2 sources | `ingestion/ingest_file.py`, `ingestion/ingest_api.py`, `config/settings.py` | `ALL_TICKERS` + pipeline d'ingestion |
-| Pipeline d'intégration | `airflow/dags/financial_pipeline_dag.py` | tâches parallèle file/API puis staging puis curated |
-| API Gateway obligatoire | `api/main.py`, `api/routers/*` | endpoints `/raw`, `/staging`, `/curated`, `/health`, `/stats` |
-| Niveau avancé `/ingest` + `/ingest_fast` + benchmark | `api/routers/ingest.py`, `api/routers/ingest_fast.py`, `scripts/benchmark_endpoints.py` | script de benchmark reproductible |
+## Services lancés par Docker Compose
 
-## Stack et ports
+- PostgreSQL, port 5432 : tables Staging, Curated, journaux d'ingestion et base Airflow.
+- MinIO, ports 9000 et 9001 : objets CSV et JSON de la zone Raw.
+- Elasticsearch, port 9200 : documents Raw interrogeables.
+- Airflow, port 8080 : planification et suivi du DAG.
+- FastAPI, port 8000 : accès aux données et déclenchement manuel des pipelines.
 
-| Élément | Rôle | Port | Lieu |
-|---|---|---|---|
-| PostgreSQL | Staging, Curated, logs d'ingestion | 5432 | `docker-compose.yml` |
-| MinIO API | Stockage objets Raw | 9000 | `docker-compose.yml` |
-| MinIO Console | UI de buckets | 9001 | `docker-compose.yml` |
-| Elasticsearch | Index brut | 9200 | `docker-compose.yml` |
-| Airflow UI | Orchestration DAG | 8080 | `airflow` services |
-| FastAPI | API Gateway | 8000 | `api/` service |
+## Lancement
 
-## Prérequis
-
-- Docker + Docker Compose
-- Git (pour la reproduction du dépôt)
-
-## Installation et lancement
+Prérequis : Docker avec Docker Compose.
 
 ```bash
 git clone https://github.com/Nathan2412/Projet-DataLake-Final.git
 cd Projet-DataLake-Final
-
 docker compose up -d
 ```
 
-Attendre le démarrage puis vérifier l'état :
+Le premier démarrage crée les tables PostgreSQL, les deux buckets MinIO et l'utilisateur Airflow.
+
+Vérification :
 
 ```bash
 docker compose ps
-docker compose logs api
-```
-
-Services attendus : PostgreSQL, MinIO, Elasticsearch, Airflow Webserver, Airflow Scheduler, API.
-
-## Vérification rapide après démarrage
-
-```bash
 curl http://localhost:8000/health
-curl http://localhost:8000/docs
-curl http://localhost:8080
-curl http://localhost:9001
 ```
 
-## Endpoints attendus
+Interfaces :
 
-- GET `/health` : vérifie Postgres, MinIO et Elasticsearch.
-- GET `/stats` : métriques par zone.
-- GET `/raw` : documents bruts depuis Elasticsearch avec filtres (`ticker`, `source`, dates, limit).
-- GET `/raw/objects` : objets présents dans MinIO.
-- GET `/staging` : OHLCV nettoyé et indicateurs.
-- GET `/staging/tickers` : liste des tickers disponibles.
-- GET `/curated` : anomalies et signaux de trading.
-- GET `/curated/anomalies/summary` : résumé des anomalies par ticker/type.
-- GET `/curated/signals` : tickers avec signal actif `buy` ou `sell`.
-- POST `/ingest` : pipeline standard séquentiel.
-- POST `/ingest_fast` : pipeline parallèle.
+- documentation FastAPI : http://localhost:8000/docs
+- Airflow : http://localhost:8080
+- MinIO : http://localhost:9001
 
-## Appels d'ingestion utiles
+Les identifiants de l'environnement local sont définis dans `docker-compose.yml`.
 
-### Ingestion standard
+## Pipeline Airflow
+
+Le DAG s'appelle `financial_data_lake_pipeline`. Il est planifié à 6 h UTC du lundi au vendredi.
+
+Ordre d'exécution :
+
+```text
+start
+  |-- ingest_file --|
+  |                 |--> transform_staging --> transform_curated --> log_summary --> end
+  |-- ingest_api  --|
+```
+
+`ingest_file` et `ingest_api` s'exécutent en parallèle. Staging commence après la fin des deux ingestions. Curated commence après Staging.
+
+![Liste des DAGs dans Airflow](docs/captures/airflow-dags.png)
+
+La capture montre le seul DAG du projet, son planning `0 6 * * 1-5` et sept tâches récentes terminées avec succès.
+
+![Exécution du DAG](docs/captures/airflow-execution.png)
+
+Cette exécution manuelle s'est terminée en 55 secondes. Les tâches `start`, `ingest_file`, `ingest_api`, `transform_staging`, `transform_curated`, `log_summary` et `end` sont toutes en succès.
+
+## API
+
+La page Swagger regroupe les routes utilisées par le projet.
+
+![Documentation Swagger de l'API](docs/captures/api-swagger.png)
+
+Routes disponibles :
+
+- `GET /health` vérifie PostgreSQL, MinIO et Elasticsearch.
+- `GET /stats` compte les objets Raw, les documents Elasticsearch et les lignes PostgreSQL.
+- `GET /raw` lit les documents Raw dans Elasticsearch.
+- `GET /raw/objects` liste les objets MinIO.
+- `GET /staging` lit les cours nettoyés et les indicateurs techniques.
+- `GET /staging/tickers` donne les tickers et leurs plages de dates.
+- `GET /curated` lit les anomalies, tendances et signaux.
+- `GET /curated/anomalies/summary` regroupe les anomalies par ticker et par type.
+- `GET /curated/signals` retourne les derniers signaux `buy` ou `sell`.
+- `POST /ingest` exécute le pipeline séquentiel.
+- `POST /ingest_fast` télécharge et écrit les données par lots parallèles.
+
+Exemple de lecture :
 
 ```bash
-curl -X POST http://localhost:8000/ingest \
-  -H "Content-Type: application/json" \
-  -d '{
-    "data": {
-      "tickers": ["AAPL", "MSFT", "^GSPC"],
-      "period": "1mo",
-      "run_staging": true,
-      "run_curated": true
-    }
-  }'
+curl "http://localhost:8000/raw?ticker=AAPL&limit=3"
+curl "http://localhost:8000/staging?ticker=AAPL&limit=3"
+curl "http://localhost:8000/curated?ticker=AAPL&limit=3"
 ```
 
-### Ingestion parallèle
+Exemple d'ingestion manuelle :
 
 ```bash
 curl -X POST http://localhost:8000/ingest_fast \
   -H "Content-Type: application/json" \
   -d '{
     "data": {
-      "tickers": ["AAPL", "MSFT", "^GSPC"],
-      "period": "1mo",
+      "tickers": ["AAPL", "MSFT", "NVDA"],
+      "period": "5d",
       "run_staging": true,
       "run_curated": true
     }
   }'
 ```
 
-Les deux endpoints retournent une structure avec `status`, `pipeline_steps`, `performance`, `errors`, `timestamp`.
+## Passage dans les trois zones
 
-## Comment vérifier les données manuellement
+![Exemple AAPL dans Raw, Staging et Curated](docs/captures/zones-aapl.png)
+
+La capture suit la dernière ligne AAPL disponible au moment du test.
+
+- Raw contient le cours reçu, le volume, la source et la date d'ingestion.
+- Staging contient le même cours après normalisation, avec la moyenne mobile, le MACD, le rendement journalier et la volatilité.
+- Curated ajoute le score d'anomalie, le type de tendance et le signal.
+
+Pour cette ligne, `is_anomaly` vaut `false`, la tendance est `neutral` et le signal est `hold`. Le pipeline n'a donc pas classé ce point comme anormal et n'a produit ni signal d'achat ni signal de vente.
+
+## Résultat de l'exécution contrôlée
+
+Le 10 juillet 2026, nous avons lancé la stack puis déclenché le DAG `financial_data_lake_pipeline` avec l'identifiant `docs_20260710T171652Z`.
+
+Résultat observé :
+
+- état général de l'API : `ok` ;
+- PostgreSQL : `ok` ;
+- MinIO : `ok` ;
+- Elasticsearch 8.11.0 : `ok` ;
+- 242 objets dans MinIO, dont 200 objets issus du fichier et 42 objets issus de l'API ;
+- 1 763 documents dans Elasticsearch ;
+- 1 243 lignes dans Staging ;
+- 1 243 lignes dans Curated ;
+- 37 lignes marquées comme anomalies ;
+- sept tâches Airflow terminées avec le statut `success`.
+
+![Résumé de l'exécution](docs/captures/resultats-execution.png)
+
+Les nombres Staging et Curated sont identiques parce que Curated enrichit chaque ligne Staging au lieu de filtrer le jeu de données. Les 37 anomalies viennent d'Isolation Forest configuré avec une contamination de 5 %. Ce nombre dépend donc du paramètre du modèle et du contenu chargé.
+
+## Transformations Staging
+
+Pour chaque ticker, le code lit les documents Elasticsearch, trie les dates, retire les doublons et ignore les lignes sans cours de clôture. Il calcule ensuite :
+
+- SMA sur 20 et 50 périodes ;
+- EMA sur 12 et 26 périodes ;
+- RSI sur 14 périodes ;
+- MACD et ligne de signal ;
+- bandes de Bollinger sur 20 périodes ;
+- rendement journalier ;
+- volatilité glissante sur 20 périodes.
+
+La clé unique `(ticker, date)` permet de rejouer une ingestion sans créer une nouvelle ligne pour la même date.
+
+## Transformations Curated
+
+Isolation Forest utilise quatre variables : rendement journalier, volatilité sur 20 périodes, z-score du volume et RSI. Le modèle ne se lance qu'à partir de 30 lignes pour un ticker. Sa contamination est fixée à 5 %.
+
+Les types d'anomalies sont attribués par des règles visibles dans `transformation/curated/transform_curated.py` :
+
+- baisse journalière inférieure à -5 % : `flash_crash` ;
+- hausse supérieure à 5 % : `price_spike` ;
+- z-score absolu du volume supérieur à 3 : `volume_spike` ;
+- volatilité supérieure à 4 % : `high_volatility` ;
+- autre point isolé : `unknown_anomaly`.
+
+La tendance compare le cours, la SMA 20 et la SMA 50. Le signal combine le RSI et le croisement MACD. Il vaut `buy`, `sell` ou `hold`. Ce signal est une sortie technique du projet, pas une recommandation financière.
+
+## Comparaison des deux ingestions
+
+`scripts/benchmark_endpoints.py` compare `/ingest` et `/ingest_fast` avec des lots de 1 et 100 tickers. Le mode rapide utilise huit threads pour les téléchargements et les envois MinIO, une écriture groupée dans Elasticsearch et `execute_values` pour PostgreSQL.
+
+Le fichier `livrables/benchmark_ingest_vs_ingest_fast.json` contient trois répétitions par mode et par taille de lot.
+
+Résultat enregistré :
+
+- lot de 1 ticker : 1 073,29 ms contre 989,86 ms, soit 7,77 % de gain ;
+- lot de 100 tickers : 104 825,65 ms contre 12 230,36 ms, soit 88,33 % de gain.
+
+Le gain est faible sur un seul ticker. Sur 100 tickers, les opérations réseau parallèles et les écritures groupées réduisent fortement le temps total.
+
+## Tests
 
 ```bash
-curl "http://localhost:8000/staging?ticker=AAPL&limit=20"
-curl "http://localhost:8000/curated?ticker=AAPL&anomalies_only=true&limit=20"
-curl "http://localhost:8000/stats"
+python -m pytest -q
 ```
 
-## Tests exécutables localement (sans stack externe)
+Résultat vérifié : 12 tests réussis.
 
-```bash
-python -m pytest tests/test_financial_logic.py tests/test_benchmark.py
-```
+Les tests couvrent les calculs RSI, les tendances, les signaux, la préparation Staging, les identifiants Raw, le chargement du CSV et le calcul du benchmark.
 
-Résultat observé sur cette branche : 12 tests passants.
+## Limites observées
 
-## Benchmark reproductible
+- Yahoo Finance est un service externe. La durée et le nombre de lignes disponibles changent selon sa réponse.
+- Le mode rapide calcule les indicateurs Staging sur le lot téléchargé. Avec une période de cinq jours, le RSI 14 reste vide car le lot ne contient pas quatorze observations.
+- Isolation Forest ne s'exécute pas sous 30 lignes pour un ticker.
+- Les signaux Curated n'ont pas été évalués comme stratégie financière.
+- Les identifiants présents dans Docker Compose sont prévus pour cet environnement local de cours.
 
-Le script enregistre systématiquement un rapport JSON, pour batch 1 et 100.
+## Documentation
 
-```bash
-python scripts/benchmark_endpoints.py \
-  --base-url http://localhost:8000 \
-  --period 5d \
-  --repeats 3 \
-  --timeout 1800 \
-  --output livrables/benchmark_ingest_vs_ingest_fast.json
-```
+- `livrables/RAPPORT_TECHNIQUE.md` décrit le fonctionnement et les résultats.
+- `docs/CONFORMITE_DEVOIR.md` relie le projet aux demandes du sujet.
+- `data/README.md` décrit le fichier CSV versionné.
+- `docs/captures/` contient les captures utilisées dans la documentation.
 
-Résultats du test du 10 juillet 2026, avec trois répétitions par lot :
-
-- 1 ticker : `/ingest` 1 073,29 ms, `/ingest_fast` 989,86 ms, gain de 7,77 %.
-- 100 tickers : `/ingest` 104 825,65 ms, `/ingest_fast` 12 230,36 ms, gain de 88,33 %.
-
-La cible de 30 % est atteinte sur le lot de 100 tickers. Les douze appels ont réussi sans erreur. Le fichier JSON contient les échantillons, l'ordre des appels et le commit testé `85aa820`.
-
-## Limites connues
-
-- Les temps d'ingestion varient selon la disponibilité réseau Yahoo Finance.
-- Le benchmark doit être relancé après une modification des pipelines ; le résultat commité décrit uniquement le commit indiqué dans le JSON.
-
-## Régénérer les PDF
+Régénération des PDF :
 
 ```bash
 .venv/bin/pip install -r scripts/requirements-docs.txt
 .venv/bin/python scripts/generate_pdf_deliverables.py
 ```
-
-## Livrables attendus
-
-- `livrables/Rapport_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf`
-- `livrables/Documentation_Technique_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf`
-- `livrables/benchmark_ingest_vs_ingest_fast.json` (mesure finale reproductible)

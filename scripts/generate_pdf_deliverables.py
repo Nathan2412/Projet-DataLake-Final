@@ -12,7 +12,8 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
 from reportlab.lib.units import cm
-from reportlab.platypus import PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer
+from reportlab.lib.utils import ImageReader
+from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, Preformatted, SimpleDocTemplate, Spacer
 
 ROOT = Path(__file__).resolve().parents[1]
 LIVRABLES = ROOT / "livrables"
@@ -60,7 +61,7 @@ def add_page_number(canvas, doc):
     canvas.restoreState()
 
 
-def add_paragraphs(text: str, st: dict[str, ParagraphStyle], story: list) -> None:
+def add_paragraphs(text: str, source_dir: Path, st: dict[str, ParagraphStyle], story: list) -> None:
     lines = text.splitlines()
     in_code = False
     code_lines: List[str] = []
@@ -88,6 +89,22 @@ def add_paragraphs(text: str, st: dict[str, ParagraphStyle], story: list) -> Non
 
         if in_code:
             code_lines.append(stripped)
+            continue
+
+        image_match = re.fullmatch(r"!\[([^]]*)\]\(([^)]+)\)", stripped.strip())
+        if image_match:
+            image_path = (source_dir / image_match.group(2)).resolve()
+            if not image_path.exists():
+                raise FileNotFoundError(f"Capture introuvable : {image_path}")
+            width, height = ImageReader(str(image_path)).getSize()
+            max_width = A4[0] - 4.4 * cm
+            max_height = 15 * cm
+            scale = min(max_width / width, max_height / height, 1)
+            image_block: list = [Image(str(image_path), width=width * scale, height=height * scale)]
+            if image_match.group(1):
+                image_block.append(Paragraph(escape_html(image_match.group(1)), st["subtitle"]))
+            image_block.append(Spacer(1, 8))
+            story.append(KeepTogether(image_block))
             continue
 
         if stripped.startswith("# "):
@@ -126,7 +143,7 @@ def generate_pdf(output: Path, sources: Iterable[Path], section_title: str) -> N
         if idx:
             story.append(PageBreak())
         content = path.read_text(encoding="utf-8")
-        add_paragraphs(content, st, story)
+        add_paragraphs(content, path.parent, st, story)
 
     doc = SimpleDocTemplate(
         str(output),
