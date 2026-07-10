@@ -19,7 +19,7 @@ def get_stats() -> dict:
     """
     stats: dict = {}
 
-    # ── Zone Raw : MinIO ──────────────────────────────────────────────────
+    # Zone Raw : MinIO
     try:
         minio = get_minio()
         raw_file_count = sum(1 for _ in minio.list_objects(BUCKET_RAW_FILE, recursive=True))
@@ -33,7 +33,7 @@ def get_stats() -> dict:
         log.error("Stats MinIO failed: %s", exc)
         stats["raw_minio"] = {"error": str(exc)}
 
-    # ── Zone Raw : Elasticsearch ──────────────────────────────────────────
+    # Zone Raw : Elasticsearch
     try:
         es = get_es()
         if es.indices.exists(index=ES_INDEX):
@@ -64,7 +64,7 @@ def get_stats() -> dict:
         log.error("Stats ES failed: %s", exc)
         stats["raw_elasticsearch"] = {"error": str(exc)}
 
-    # ── Zone Staging + Curated : PostgreSQL ───────────────────────────────
+    # Zones Staging et Curated : PostgreSQL
     try:
         conn = get_pg_conn()
         with conn.cursor() as cur:

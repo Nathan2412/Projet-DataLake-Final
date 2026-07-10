@@ -2,10 +2,8 @@
 import os
 import psycopg2
 import psycopg2.extras
-import redis
 from minio import Minio
 from elasticsearch import Elasticsearch
-from functools import lru_cache
 
 POSTGRES = {
     "host":     os.getenv("POSTGRES_HOST", "localhost"),
@@ -23,12 +21,6 @@ MINIO_CONFIG = {
 }
 
 ES_URL   = f"http://{os.getenv('ES_HOST', 'localhost')}:{os.getenv('ES_PORT', '9200')}"
-REDIS_CONFIG = {
-    "host": os.getenv("REDIS_HOST", "localhost"),
-    "port": int(os.getenv("REDIS_PORT", 6379)),
-    "db":   0,
-}
-
 BUCKET_RAW_FILE = "raw-financial-data"
 BUCKET_RAW_API  = "raw-api-data"
 ES_INDEX        = "raw_financial_events"
@@ -44,7 +36,3 @@ def get_minio() -> Minio:
 
 def get_es() -> Elasticsearch:
     return Elasticsearch(ES_URL)
-
-
-def get_redis() -> redis.Redis:
-    return redis.Redis(**REDIS_CONFIG, decode_responses=True)

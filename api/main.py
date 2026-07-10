@@ -2,15 +2,15 @@
 API Gateway du Data Lake Financier.
 
 Endpoints standard :
-  GET  /health       – état des services
-  GET  /stats        – métriques de remplissage
-  GET  /raw          – données brutes (MinIO + Elasticsearch)
-  GET  /staging      – données transformées avec indicateurs
-  GET  /curated      – données enrichies avec anomalies
+  GET  /health       : état des services
+  GET  /stats        : métriques de remplissage
+  GET  /raw          : données brutes (MinIO + Elasticsearch)
+  GET  /staging      : données transformées avec indicateurs
+  GET  /curated      : données enrichies avec anomalies
 
 Endpoints avancés :
-  POST /ingest       – ingestion synchrone avec benchmark
-  POST /ingest_fast  – ingestion optimisée (async + cache + parallélisation)
+  POST /ingest       : ingestion synchrone avec benchmark
+  POST /ingest_fast  - ingestion parallèle
 """
 import logging
 from contextlib import asynccontextmanager
@@ -26,7 +26,7 @@ log = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    log.info("API Gateway démarrée – Data Lake Financier")
+    log.info("API Gateway démarrée - Data Lake Financier")
     yield
     log.info("API Gateway arrêtée")
 
@@ -36,7 +36,7 @@ app = FastAPI(
     description=(
         "API Gateway du data lake financier (Yahoo Finance / yfinance). "
         "Expose les trois zones du data lake (Raw, Staging, Curated) "
-        "et fournit des endpoints d'ingestion standard et optimisé."
+        "et fournit deux endpoints d'ingestion."
     ),
     version="1.0.0",
     lifespan=lifespan,

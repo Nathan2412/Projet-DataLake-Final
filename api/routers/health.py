@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from dependencies import get_pg_conn, get_minio, get_es, get_redis, BUCKET_RAW_FILE, BUCKET_RAW_API
+from dependencies import get_pg_conn, get_minio, get_es, BUCKET_RAW_FILE, BUCKET_RAW_API
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -23,7 +23,7 @@ class HealthResponse(BaseModel):
 def health_check() -> HealthResponse:
     """
     Vérifie la connectivité de tous les services :
-    PostgreSQL, MinIO, Elasticsearch, Redis.
+    PostgreSQL, MinIO et Elasticsearch.
     """
     services: dict[str, ServiceStatus] = {}
 
@@ -62,15 +62,6 @@ def health_check() -> HealthResponse:
     except Exception as exc:
         log.error("Elasticsearch health check failed: %s", exc)
         services["elasticsearch"] = ServiceStatus(status="error", details=str(exc))
-
-    # Redis
-    try:
-        r = get_redis()
-        r.ping()
-        services["redis"] = ServiceStatus(status="ok")
-    except Exception as exc:
-        log.error("Redis health check failed: %s", exc)
-        services["redis"] = ServiceStatus(status="error", details=str(exc))
 
     overall = "ok" if all(s.status == "ok" for s in services.values()) else "degraded"
     return HealthResponse(overall=overall, services=services)

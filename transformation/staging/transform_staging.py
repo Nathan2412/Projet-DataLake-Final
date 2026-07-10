@@ -10,9 +10,8 @@ Pour chaque ticker :
 from __future__ import annotations
 
 import logging
-import sys
 import os
-from datetime import datetime, timezone
+import sys
 
 import numpy as np
 import pandas as pd
@@ -35,7 +34,7 @@ def get_es_client() -> Elasticsearch:
     return Elasticsearch(ES_URL)
 
 
-# ── Indicateurs techniques ─────────────────────────────────────────────────
+# Indicateurs techniques
 
 def calc_sma(series: pd.Series, window: int) -> pd.Series:
     return series.rolling(window=window, min_periods=1).mean()
@@ -88,7 +87,29 @@ def add_technical_indicators(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-# ── Récupération des données Raw depuis ES ─────────────────────────────────
+def prepare_staging_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Normalise les champs communs, déduplique puis calcule les indicateurs."""
+    required = ["ticker", "date", "open", "high", "low", "close", "volume"]
+    missing = [c for c in required if c not in df.columns]
+    if missing:
+        raise ValueError(f"Colonnes manquantes pour le staging : {missing}")
+
+    df = df.copy()
+    df["ticker"] = df["ticker"].astype(str).str.strip().str.upper()
+    df["date"] = pd.to_datetime(df["date"], errors="coerce")
+    for col in ["open", "high", "low", "close"]:
+        df[col] = pd.to_numeric(df[col], errors="coerce")
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0).astype(int)
+    df["adj_close"] = pd.to_numeric(df.get("adj_close", df["close"]), errors="coerce")
+    df = df.sort_values(["ticker", "date"]).drop_duplicates(subset=["ticker", "date"], keep="last")
+    df = df.dropna(subset=["close"])
+
+    df = add_technical_indicators(df)
+    return df.reset_index(drop=True)
+
+
+
+# Lecture des données Raw depuis Elasticsearch
 
 def fetch_raw_from_es(es: Elasticsearch, ticker: str) -> pd.DataFrame:
     """Récupère toutes les données brutes d'un ticker depuis Elasticsearch."""
@@ -104,29 +125,13 @@ def fetch_raw_from_es(es: Elasticsearch, ticker: str) -> pd.DataFrame:
     if not hits:
         raise ValueError(f"Aucune donnée trouvée dans ES pour {ticker}")
 
-    records = [h["_source"] for h in hits]
-    df = pd.DataFrame(records)
-
-    required = ["ticker", "date", "open", "high", "low", "close", "volume"]
-    missing = [c for c in required if c not in df.columns]
-    if missing:
-        raise ValueError(f"Colonnes manquantes pour {ticker} : {missing}")
-
-    df["date"] = pd.to_datetime(df["date"])
-    for col in ["open", "high", "low", "close"]:
-        df[col] = pd.to_numeric(df[col], errors="coerce")
-    df["volume"] = pd.to_numeric(df["volume"], errors="coerce").fillna(0).astype(int)
-    df["adj_close"] = pd.to_numeric(df.get("adj_close", df["close"]), errors="coerce")
-
-    # Suppression des doublons (garder la dernière source)
-    df = df.sort_values("date").drop_duplicates(subset=["date"], keep="last")
-    df = df.dropna(subset=["close"])  # close obligatoire
-
-    log.info("ES → %d lignes brutes récupérées pour %s", len(df), ticker)
-    return df.reset_index(drop=True)
+    df = pd.DataFrame([h["_source"] for h in hits])
+    prepared = prepare_staging_dataframe(df)
+    log.info("ES → %d lignes brutes récupérées pour %s", len(prepared), ticker)
+    return prepared
 
 
-# ── Écriture dans PostgreSQL ───────────────────────────────────────────────
+# Écriture dans PostgreSQL
 
 def upsert_to_staging(conn, df: pd.DataFrame) -> int:
     """Upsert les données dans staging_ohlcv."""
@@ -202,7 +207,7 @@ def upsert_to_staging(conn, df: pd.DataFrame) -> int:
     return len(records)
 
 
-# ── Point d'entrée ─────────────────────────────────────────────────────────
+# Point d'entrée
 
 def run_staging(tickers: list[str]) -> dict:
     """Transforme et charge les données de la zone Raw vers Staging."""
@@ -215,7 +220,6 @@ def run_staging(tickers: list[str]) -> dict:
             try:
                 log.info("=== Staging : %s ===", ticker)
                 df = fetch_raw_from_es(es, ticker)
-                df = add_technical_indicators(df)
                 count = upsert_to_staging(conn, df)
                 results["success"].append({"ticker": ticker, "rows": count})
                 results["processed"] += count
