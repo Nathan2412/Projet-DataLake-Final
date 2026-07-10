@@ -194,14 +194,11 @@ Ne pas considérer une valeur fixe comme preuve définitive. **Le benchmark doit
 - Les données testées ci-dessus sont des données courtes de requête pour un run court ; on doit refaire la boucle complète en environnement réel pour une validation finale.
 - Le vieux fichier `livrables/benchmark_ingest_vs_ingest_fast.json` est conservé comme historique, et n'est pas une preuve de réexécution de la branche actuelle.
 
-## Commandes de maintenance minimales
+## Régénérer les PDF
 
 ```bash
-docker compose down
-docker compose up -d
-
-docker compose logs -f api airflow-scheduler airflow-webserver
-
+.venv/bin/pip install -r scripts/requirements-docs.txt
+.venv/bin/python scripts/generate_pdf_deliverables.py
 ```
 
 ## Livrables attendus
