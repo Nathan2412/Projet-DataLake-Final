@@ -643,7 +643,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     story.append(
         p(
             "Notre lecture des résultats est la suivante : le nombre d'objets MinIO, le nombre de documents Elasticsearch, les lignes staging "
-            "et les lignes curated ne représentent pas la même granularité. MinIO conserve les preuves brutes, "
+            "et les lignes curated ne comptent pas la même chose. MinIO conserve les preuves brutes, "
             "Elasticsearch indexe les observations ticker/date, staging nettoie et enrichit les séries, puis curated "
             "ajoute les signaux analytiques et les anomalies.",
         )
@@ -659,7 +659,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
     architecture_rows = [
         ["Couche", "Rôle", "Pourquoi ce choix"],
         ["Raw / MinIO", "Conserver fichiers et réponses API sans transformation.", "Traçabilité : on peut prouver ce qui a été reçu avant nettoyage."],
-        ["Raw / Elasticsearch", "Indexer les observations ticker/date.", "Recherche rapide et contrôle de volumétrie par ticker."],
+        ["Raw / Elasticsearch", "Indexer les observations ticker/date.", "Recherche rapide et suivi du nombre d'observations par ticker."],
         ["Staging / PostgreSQL", "Nettoyer, typer, dédupliquer et calculer SMA/EMA/RSI/MACD/Bollinger.", "Base relationnelle stable pour transformations reproductibles."],
         ["Curated / PostgreSQL", "Ajouter score anomalie, type d'anomalie, tendance et signal.", "Couche finale directement exploitable par API ou analyse."],
         ["Airflow + FastAPI", "Orchestrer et exposer le pipeline.", "Airflow prouve l'automatisation ; FastAPI permet tests, démos et intégration."],
@@ -689,7 +689,7 @@ def make_report(stats: dict[str, Any], health: dict[str, Any], benchmark: dict[s
         bullet(
             [
                 f"<b>{safe_number(stats.get('raw_minio', {}).get('total_objects', 'n/a'))} objets MinIO</b> : ce sont des fichiers ou payloads bruts. Un objet peut contenir plusieurs lignes financières ; ce volume mesure donc la traçabilité, pas le nombre de cotations.",
-                f"<b>{safe_number(stats.get('raw_elasticsearch', {}).get('total_documents', 'n/a'))} documents Elasticsearch</b> : ici la granularité est ticker/date, donc le compteur se rapproche du nombre d'observations de marché.",
+                f"<b>{safe_number(stats.get('raw_elasticsearch', {}).get('total_documents', 'n/a'))} documents Elasticsearch</b> : ici, chaque document correspond à un ticker et à une date, donc le compteur se rapproche du nombre d'observations de marché.",
                 f"<b>{safe_number(stats.get('staging', {}).get('total_rows', 'n/a'))} lignes staging</b> : notre pipeline supprime les doublons par date, convertit les colonnes numériques et retire les clôtures manquantes. La légère baisse par rapport au raw indexé est attendue.",
                 f"<b>{safe_number(stats.get('curated', {}).get('total_rows', 'n/a'))} lignes curated</b> : la couche finale contient les séries scorées. L'écart exact avec staging est expliqué par {missing.get('count')} tickers non propagés en curated ({safe_number(missing.get('total_rows'))} lignes), principalement {', '.join(item['ticker'] for item in missing.get('items', [])[:4])}.",
             ]
