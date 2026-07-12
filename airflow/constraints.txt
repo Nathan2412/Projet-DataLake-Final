@@ -1,0 +1,5 @@
+# Versions fournies par apache/airflow:slim-2.8.1-python3.11.
+# Elles restent sous le contrôle d'Airflow pendant l'installation du projet.
+markdown-it-py==3.0.0
+protobuf==4.25.2
+rich==13.7.0

@@ -1,5 +1,7 @@
 """Endpoint /raw : accès aux données brutes (MinIO + Elasticsearch)."""
 import logging
+from typing import Literal
+
 from fastapi import APIRouter, Query, HTTPException
 
 from dependencies import get_minio, get_es, BUCKET_RAW_FILE, BUCKET_RAW_API, ES_INDEX
@@ -11,7 +13,10 @@ router = APIRouter()
 @router.get("/raw", summary="Données brutes de la zone Raw")
 def get_raw(
     ticker:  str | None = Query(None,  description="Filtrer par ticker (ex: AAPL, ^GSPC)"),
-    source:  str | None = Query(None,  description="Source : 'file' ou 'api'"),
+    source: Literal["file", "api", "manual"] | None = Query(
+        None,
+        description="Source : 'file', 'api' ou 'manual'",
+    ),
     limit:   int        = Query(100,   ge=1, le=1000, description="Nombre de documents à retourner"),
     from_date: str | None = Query(None, description="Date de début (YYYY-MM-DD)"),
     to_date:   str | None = Query(None, description="Date de fin (YYYY-MM-DD)"),
@@ -32,7 +37,11 @@ def get_raw(
         must_clauses.append({"term": {"ticker": ticker.upper()}})
 
     if source:
-        source_value = "yfinance_file" if source == "file" else "yfinance_api"
+        source_value = {
+            "file": "yfinance_file",
+            "api": "yfinance_api",
+            "manual": "yfinance_manual",
+        }[source]
         must_clauses.append({"term": {"source": source_value}})
 
     if from_date or to_date:

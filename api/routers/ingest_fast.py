@@ -233,7 +233,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
             for _, row in df.iterrows():
                 es_actions.append({
                     "_index": "raw_financial_events",
-                    "_id":    raw_document_id("yfinance_fast", ticker, row['date']),
+                    "_id":    raw_document_id("yfinance_manual", ticker, row['date']),
                     "_source": {
                         "ticker":      ticker,
                         "date":        row["date"],
@@ -243,7 +243,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
                         "close":       float(row["close"])  if pd.notna(row.get("close"))  else None,
                         "adj_close":   float(row["adj_close"]) if pd.notna(row.get("adj_close")) else None,
                         "volume":      int(row["volume"])   if pd.notna(row.get("volume")) else None,
-                        "source":      "yfinance_fast",
+                        "source":      "yfinance_manual",
                         "ingested_at": now_iso,
                     },
                 })

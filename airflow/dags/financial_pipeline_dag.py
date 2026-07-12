@@ -2,7 +2,7 @@
 DAG principal du data lake financier.
 
 Orchestration complète : Raw → Staging → Curated
-Scheduling : quotidien à 6h UTC (après ouverture des marchés européens)
+Planification : 6 h UTC du lundi au vendredi
 
 Flux :
   [ingest_file] --|
@@ -35,7 +35,9 @@ DEFAULT_ARGS = {
 }
 
 
-# Fonctions appelées par les PythonOperators
+# Airflow réimporte régulièrement ce fichier pour découvrir le DAG. Les modules
+# métier restent importés dans les tâches afin de ne charger pandas, yfinance et
+# scikit-learn qu'au moment où le worker exécute la tâche.
 
 def task_ingest_file(**context) -> dict:
     """Ingère le fichier data/finance_dataset.csv."""

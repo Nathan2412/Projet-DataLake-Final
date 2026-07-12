@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import re
+import textwrap
 from pathlib import Path
 from typing import Iterable, List
 
@@ -18,8 +19,7 @@ from reportlab.platypus import Image, KeepTogether, PageBreak, Paragraph, Prefor
 ROOT = Path(__file__).resolve().parents[1]
 LIVRABLES = ROOT / "livrables"
 RAPPORT_SRC = ROOT / "livrables" / "RAPPORT_TECHNIQUE.md"
-README_SRC = ROOT / "README.md"
-CONFORMITE_SRC = ROOT / "docs" / "CONFORMITE_DEVOIR.md"
+GUIDE_SRC = ROOT / "docs" / "GUIDE_UTILISATION.md"
 
 REPORT_PDF = ROOT / "livrables" / "Rapport_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf"
 TECH_PDF = ROOT / "livrables" / "Documentation_Technique_DataLake_Finance_Artemiy_Smogunov_Nathan_Smadja-Tubiana_Patrice_Ignongui.pdf"
@@ -79,7 +79,10 @@ def add_paragraphs(text: str, source_dir: Path, st: dict[str, ParagraphStyle], s
 
         if stripped.startswith("```"):
             if in_code:
-                story.append(Preformatted("\n".join(code_lines), st["code"]))
+                wrapped = []
+                for code_line in code_lines:
+                    wrapped.extend(textwrap.wrap(code_line, width=88, replace_whitespace=False) or [""])
+                story.append(Preformatted("\n".join(wrapped), st["code"]))
                 story.append(Spacer(1, 4))
                 code_lines.clear()
                 in_code = False
@@ -98,7 +101,7 @@ def add_paragraphs(text: str, source_dir: Path, st: dict[str, ParagraphStyle], s
                 raise FileNotFoundError(f"Capture introuvable : {image_path}")
             width, height = ImageReader(str(image_path)).getSize()
             max_width = A4[0] - 4.4 * cm
-            max_height = 15 * cm
+            max_height = 17 * cm
             scale = min(max_width / width, max_height / height, 1)
             image_block: list = [Image(str(image_path), width=width * scale, height=height * scale)]
             if image_match.group(1):
@@ -158,7 +161,7 @@ def generate_pdf(output: Path, sources: Iterable[Path], section_title: str) -> N
 
 def main() -> None:
     generate_pdf(REPORT_PDF, [RAPPORT_SRC], "Rapport technique")
-    generate_pdf(TECH_PDF, [README_SRC, CONFORMITE_SRC], "Documentation technique")
+    generate_pdf(TECH_PDF, [GUIDE_SRC], "Documentation technique")
 
 
 if __name__ == "__main__":

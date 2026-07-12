@@ -7,7 +7,7 @@ import pandas as pd
 
 from ingestion.ingest_api import index_api_data_to_es
 from ingestion.ingest_file import index_to_elasticsearch, load_file_dataset, raw_document_id
-from transformation.curated.transform_curated import classify_anomaly_type
+from transformation.curated.transform_curated import classify_anomaly_type, compute_signal, compute_trend
 from transformation.staging.transform_staging import add_technical_indicators, calc_rsi, prepare_staging_dataframe
 from unittest.mock import MagicMock, patch
 
@@ -59,6 +59,18 @@ class FinancialIndicatorTests(unittest.TestCase):
         flat = calc_rsi(pd.Series(np.ones(40)))
         self.assertEqual(rising.iloc[-1], 100.0)
         self.assertEqual(flat.iloc[-1], 50.0)
+
+
+class TrendAndSignalTests(unittest.TestCase):
+    def test_trend_uses_close_and_both_moving_averages(self):
+        self.assertEqual(compute_trend(pd.Series({"close": 120, "sma_20": 110, "sma_50": 100})), "bullish")
+        self.assertEqual(compute_trend(pd.Series({"close": 80, "sma_20": 90, "sma_50": 100})), "bearish")
+        self.assertEqual(compute_trend(pd.Series({"close": 105, "sma_20": 100, "sma_50": 110})), "neutral")
+
+    def test_signal_combines_rsi_and_macd(self):
+        self.assertEqual(compute_signal(pd.Series({"rsi_14": 25, "macd": 2, "macd_signal": 1})), "buy")
+        self.assertEqual(compute_signal(pd.Series({"rsi_14": 75, "macd": 1, "macd_signal": 2})), "sell")
+        self.assertEqual(compute_signal(pd.Series({"rsi_14": 50, "macd": 2, "macd_signal": 1})), "hold")
 
 
 class FileDatasetTests(unittest.TestCase):

@@ -1,10 +1,17 @@
-FROM python:3.11-slim
+FROM python:3.11.15-slim
+
+COPY --from=ghcr.io/astral-sh/uv:0.11.28 /uv /uvx /bin/
 
 WORKDIR /app
 
-# Installation des dépendances
-COPY api/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# uv installe exactement les versions du verrou dans un environnement isolé.
+ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    PATH="/opt/venv/bin:$PATH"
+
+COPY pyproject.toml uv.lock .python-version ./
+RUN uv sync --frozen --no-dev --group api --no-install-project
 
 # Code de l'API et modules partagés
 COPY api/           /app/

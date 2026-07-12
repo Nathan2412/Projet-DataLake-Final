@@ -1,302 +1,222 @@
-# Rapport technique
+# Rapport technique du Data Lake financier
 
-## Projet et données utilisées
+## Périmètre
 
-Nous avons construit un data lake financier qui traite des cours journaliers. Le dépôt contient une source fichier et une source API.
+Ce projet met en place un pipeline de données financières avec deux sources, trois zones de traitement, une orchestration Airflow et une API de consultation. Nous avons retenu un périmètre local reproductible avec Docker Compose. Le projet ne contient pas d'interface métier dédiée, de moteur de recommandation financière ni de déploiement cloud.
 
-La source fichier est `data/finance_dataset.csv`. Elle contient l'historique AAPL du 3 janvier 2022 au 19 novembre 2024. Le pipeline la lit directement depuis le dépôt.
-
-La seconde source est Yahoo Finance. Le code l'interroge avec `yfinance` pour les tickers définis dans `config/settings.py` : AAPL, MSFT, GOOGL, AMZN, NVDA, META, TSLA, BRK-B, JPM, JNJ, ^GSPC, ^DJI, ^IXIC et ^RUT.
-
-Nous avons lancé la stack Docker et exécuté le DAG avant de rédiger ce rapport. Les nombres et comportements présentés ici viennent de cette exécution et du code présent dans le dépôt.
+Les deux sources sont le fichier versionné `finance_dataset.csv` et Yahoo Finance, interrogé avec `yfinance`. Le CSV contient 732 lignes AAPL du 3 janvier 2022 au 29 novembre 2024. Le DAG interroge aussi dix actions et quatre indices pour récupérer le dernier cours disponible.
 
 ## Architecture exécutée
 
-Docker Compose lance PostgreSQL, MinIO, Elasticsearch, Airflow et FastAPI sur le même réseau `datalake-net`.
-
 ```text
-finance_dataset.csv ---- ingest_file ----|
-                                         |--> MinIO
-Yahoo Finance ---------- ingest_api -----|--> Elasticsearch
-                                                |
-                                                v
-                                      staging_ohlcv
-                                         PostgreSQL
-                                                |
-                                                v
-                                      curated_analysis
-                                         PostgreSQL
-                                                |
-                                                v
-                                            FastAPI
+                       +--------------------+
+CSV -----------------> |                    |
+                       | Raw                | --> Staging --> Curated
+Yahoo Finance -------->| MinIO + ES         |     PostgreSQL  PostgreSQL
+                       +--------------------+                     |
+                                Airflow orchestre                 v
+                                                              FastAPI
 ```
 
-MinIO et Elasticsearch appartiennent tous les deux à la zone Raw, mais ils n'ont pas le même rôle. MinIO conserve les objets CSV et JSON. Elasticsearch conserve une ligne indexée par source, ticker et date afin que l'API puisse filtrer les données brutes.
+PostgreSQL 15 contient les tables Staging, Curated, les journaux des ingestions manuelles et les tables internes Airflow.
 
-PostgreSQL contient les tables `staging_ohlcv`, `curated_analysis` et `ingestion_logs`. Airflow utilise la même instance PostgreSQL pour ses propres tables.
+MinIO conserve les objets Raw. Le bucket `raw-financial-data` reçoit les CSV. Le bucket `raw-api-data` reçoit les payloads JSON de l'ingestion planifiée.
+
+Elasticsearch 8.11.0 contient l'index `raw_financial_events`. Chaque document possède un identifiant construit avec la source, le ticker et la date.
+
+Airflow 2.8.1 utilise `LocalExecutor`. Le Webserver expose l'interface et le scheduler lance les tâches.
+
+FastAPI expose les routes de santé, de statistiques, de lecture et d'ingestion manuelle. Uvicorn démarre quatre workers dans le conteneur API.
+
+## Reproductibilité Python avec uv
+
+Le dépôt possède maintenant un `pyproject.toml`, un `.python-version` et un `uv.lock` à la racine. Python est fixé à la branche 3.11. Le verrou contient les versions transitives exactes.
+
+Les dépendances métier communes sont Elasticsearch, MinIO, NumPy, pandas, psycopg2, scikit-learn et yfinance. Les dépendances FastAPI, tests et PDF sont séparées dans des groupes uv.
+
+L'image API exécute `uv sync --frozen`. L'image Airflow est construite une seule fois avant le démarrage des services. Elle ne repose plus sur `_PIP_ADDITIONAL_REQUIREMENTS`, qui installait les paquets dans `airflow-init`, le Webserver et le scheduler à chaque création de conteneur.
+
+Airflow 2.8.1 impose des versions internes précises de `rich`, `protobuf` et `markdown-it-py`. L'image Airflow garde ces trois versions. Les autres dépendances métier viennent du verrou. Le build exécute `pip check` et échoue si l'environnement contient une incompatibilité.
+
+La validation finale donne les mêmes versions métier dans l'API et Airflow : Python 3.11, yfinance 1.4.1, pandas 2.2.0, NumPy 1.26.4, scikit-learn 1.4.0 et le client Elasticsearch 8.12.1.
+
+## Organisation du code
+
+Le code est réparti entre `config`, `ingestion`, `transformation`, `api`, `airflow`, `scripts` et `tests`.
+
+La proposition d'un package sous `src` n'est pas implémentée dans cette version. Les imports actuels, les volumes Airflow et le chemin par défaut du CSV dépendent de l'organisation présente. Une migration partielle aurait rendu la documentation fausse et risqué de casser le DAG. Le code reste donc réutilisable à l'intérieur du dépôt, mais il n'est pas publié comme package Python installable.
+
+## Ingestion du fichier
+
+L'ingestion fichier lit le CSV, normalise les noms de colonnes, convertit les valeurs numériques et vérifie la présence de `ticker`, `date`, `open`, `high`, `low`, `close` et `volume`.
+
+Le ticker est mis en majuscules. La date est convertie au format `YYYY-MM-DD`. Les lignes sans ticker, date ou cours de clôture sont retirées. Pour une clé `(ticker, date)` répétée, la dernière ligne est conservée.
+
+Le jeu de données est ensuite séparé par ticker. Chaque partie est écrite en CSV dans MinIO et indexée par lot dans Elasticsearch avec la source `yfinance_file`.
+
+## Ingestion Yahoo Finance
+
+L'ingestion API calcule une date de début à partir du nombre de jours demandé. Pour chaque ticker, `yfinance.Ticker.history` récupère les cours.
+
+Le payload contient le ticker, l'heure de collecte, la source, les cours et des métadonnées lorsqu'elles sont disponibles : nom court, secteur, industrie, capitalisation, devise et place de cotation.
+
+Le JSON complet est écrit dans MinIO. Les cours sont ensuite indexés dans Elasticsearch avec la source `yfinance_api`.
+
+Le DAG utilise une fenêtre de deux jours. Lors du run final, chaque ticker a retourné une ligne datée du 10 juillet 2026. Les quatorze tickers ont réussi.
 
 ## Zone Raw
 
-### Ingestion du fichier
+MinIO conserve le contenu des sources dans leur format de transport. Elasticsearch rend les lignes interrogeables avec des filtres sur le ticker, la source et la date.
 
-`ingestion/ingest_file.py` charge `data/finance_dataset.csv`, normalise les noms de colonnes et vérifie la présence de `ticker`, `date`, `open`, `high`, `low`, `close` et `volume`.
+![Buckets et contenu API dans MinIO](../docs/captures/10-minio-buckets.png)
 
-Le module :
+La capture montre les deux buckets et les dossiers créés pour les tickers API. Un run sur volumes vides produit un objet fichier et quatorze objets API.
 
-1. convertit le ticker en majuscules ;
-2. convertit les dates au format `YYYY-MM-DD` ;
-3. convertit les colonnes numériques ;
-4. retire les lignes sans ticker, date ou clôture ;
-5. garde la dernière ligne en cas de doublon `(ticker, date)` ;
-6. écrit un CSV par ticker dans le bucket `raw-financial-data` ;
-7. indexe chaque ligne dans `raw_financial_events`.
+![Dernière ligne AAPL dans Raw](../docs/captures/05-zone-raw-aapl.png)
 
-L'identifiant Elasticsearch suit le format `source_ticker_date`. Une nouvelle ingestion de la même source, du même ticker et de la même date met donc à jour le document au lieu d'en créer un second.
+La ligne Raw du 10 juillet 2026 provient de `yfinance_api`. Elle contient le cours, le volume et les métadonnées Apple renvoyées au moment du test.
 
-### Ingestion Yahoo Finance
+## Transformation Staging
 
-`ingestion/ingest_api.py` récupère les dernières dates disponibles. Le payload JSON contient le ticker, la date de récupération, la source, les métadonnées disponibles et les enregistrements OHLCV.
+Staging lit les documents Elasticsearch d'un ticker par date croissante. Le code récupère au maximum 10 000 documents pour un ticker.
 
-Le JSON complet est écrit dans `raw-api-data`. Les cours sont ensuite indexés dans Elasticsearch avec la source `yfinance_api`.
+La préparation effectue les traitements suivants :
 
-Le DAG demande deux jours de recul. L'endpoint manuel accepte une période comme `5d` ou `1mo`.
+- conversion du ticker en majuscules ;
+- conversion de la date et des valeurs numériques ;
+- remplacement d'un volume manquant par zéro ;
+- tri par ticker et date ;
+- conservation d'une ligne par `(ticker, date)` ;
+- suppression des lignes sans cours de clôture.
 
-## Zone Staging
+Les indicateurs calculés sont :
 
-`transformation/staging/transform_staging.py` relit toutes les lignes Raw d'un ticker depuis Elasticsearch. Il les trie par date, les déduplique et calcule les indicateurs sur la série obtenue.
+- SMA 20 et SMA 50 ;
+- EMA 12 et EMA 26 ;
+- RSI 14 ;
+- MACD et ligne de signal ;
+- bandes de Bollinger sur 20 périodes ;
+- rendement par rapport à la ligne précédente ;
+- volatilité glissante sur 20 périodes.
 
-Les colonnes ajoutées sont :
+Les lignes sont écrites dans `staging_ohlcv` avec un upsert. Un nouveau run peut donc corriger une date sans créer de doublon.
 
-- `sma_20` et `sma_50` ;
-- `ema_12` et `ema_26` ;
-- `rsi_14` ;
-- `macd` et `macd_signal` ;
-- `bollinger_upper` et `bollinger_lower` ;
-- `daily_return` ;
-- `volatility_20`.
+![AAPL après la transformation Staging](../docs/captures/06-zone-staging-aapl.png)
 
-Les valeurs non numériques, infinies ou absentes sont converties en `NULL` avant l'écriture PostgreSQL. L'upsert utilise la contrainte unique `(ticker, date)`.
+Cette capture montre les indicateurs calculés pour la dernière ligne AAPL.
 
-## Zone Curated
+## Transformation Curated
 
-`transformation/curated/transform_curated.py` lit les données Staging par ticker.
+Curated relit l'historique Staging du ticker. Le code calcule d'abord un z-score glissant du volume sur 20 lignes, avec un minimum de cinq observations.
 
-### Détection d'anomalies
+Isolation Forest utilise quatre variables : rendement journalier, volatilité sur 20 périodes, z-score du volume et RSI. Les valeurs manquantes sont remplacées par la médiane de leur colonne pour l'entrée du modèle.
 
-Le modèle Isolation Forest travaille sur quatre colonnes :
+Le modèle ne s'exécute pas sous 30 lignes. Au-dessus de ce seuil, il utilise 100 estimateurs, une contamination de 5 %, `random_state=42` et tous les cœurs disponibles.
 
-- rendement journalier ;
-- volatilité sur 20 périodes ;
-- z-score glissant du volume ;
-- RSI 14.
+Les anomalies détectées sont classées dans cet ordre :
 
-Les colonnes manquantes sont remplacées par leur médiane. Le modèle utilise 100 arbres, `random_state=42` et une contamination de 5 %. Il ne se lance pas si le ticker contient moins de 30 lignes. Dans ce cas, le score vaut 0 et aucune ligne n'est marquée comme anomalie.
+- rendement inférieur à -5 % : `flash_crash` ;
+- rendement supérieur à 5 % : `price_spike` ;
+- z-score absolu du volume supérieur à 3 : `volume_spike` ;
+- volatilité supérieure à 4 % : `high_volatility` ;
+- autre point isolé : `unknown_anomaly`.
 
-Après la détection, le code attribue un type selon des seuils fixes :
+La tendance vaut `bullish` lorsque le cours est supérieur à la SMA 20, elle-même supérieure à la SMA 50. La condition inverse produit `bearish`. Les autres cas produisent `neutral`.
 
-- `flash_crash` sous -5 % de rendement journalier ;
-- `price_spike` au-dessus de 5 % ;
-- `volume_spike` si le z-score absolu du volume dépasse 3 ;
-- `high_volatility` si la volatilité dépasse 4 % ;
-- `unknown_anomaly` pour les autres points isolés.
+Le signal vaut `buy` lorsque le RSI est inférieur à 30 et que le MACD est au-dessus de sa ligne de signal. Il vaut `sell` lorsque le RSI dépasse 70 et que le MACD est sous sa ligne de signal. Sinon, il vaut `hold`.
 
-### Tendance et signal
+![AAPL après la transformation Curated](../docs/captures/07-zone-curated-aapl.png)
 
-La tendance est `bullish` si le cours est supérieur à la SMA 20, elle-même supérieure à la SMA 50. La condition inverse produit `bearish`. Les autres cas donnent `neutral`.
+La dernière ligne AAPL est une anomalie `price_spike`, avec une tendance `bullish` et un signal `hold`.
 
-Le signal vaut `buy` lorsque le RSI est inférieur à 30 et que le MACD dépasse sa ligne de signal. Il vaut `sell` lorsque le RSI dépasse 70 et que le MACD est sous sa ligne de signal. Les autres cas donnent `hold`.
+## Discontinuité temporelle observée
 
-Nous utilisons ces valeurs pour montrer l'enrichissement Curated. Elles ne constituent pas des conseils financiers.
+Le rendement de 32,86 % visible sur la dernière ligne ne représente pas une séance boursière. Le dernier point du CSV date du 29 novembre 2024. La ligne API suivante date du 10 juillet 2026. Après le tri, `pct_change` compare ces deux cours malgré l'intervalle de plus d'un an.
 
-## Orchestration Airflow
+Cette rupture augmente aussi la volatilité et influence le score d'anomalie. Le projet ne détecte pas encore les trous de calendrier avant le calcul des indicateurs. La capture est conservée parce qu'elle correspond au comportement réel du code et du dataset.
 
-Le DAG `financial_data_lake_pipeline` suit ce graphe :
+## DAG Airflow
 
-```text
-start
-  |-- ingest_file --|
-  |                 |--> transform_staging --> transform_curated --> log_summary --> end
-  |-- ingest_api  --|
-```
+Le DAG est planifié à 6 h UTC du lundi au vendredi, avec `catchup=False` et un seul run actif. Chaque tâche peut être retentée deux fois avec un délai de cinq minutes.
 
-Il est planifié avec l'expression `0 6 * * 1-5`, soit 6 h UTC du lundi au vendredi. Il n'exécute pas de rattrapage historique et limite les exécutions actives à une. Chaque tâche Python peut être retentée deux fois avec cinq minutes d'attente.
+Les imports des modules d'ingestion et de transformation sont placés dans les fonctions des tâches. Ce choix est intentionnel. Airflow réimporte régulièrement le fichier du DAG pour le découvrir. Si pandas, yfinance et scikit-learn étaient chargés au niveau du module, chaque parsing chargerait ces bibliothèques. Un problème de dépendance pourrait aussi empêcher Airflow d'afficher le DAG. Les imports différés reportent ce chargement au worker qui exécute la tâche.
 
-Les deux ingestions démarrent ensemble. Elles transmettent leurs tickers réussis par XCom. Staging traite l'union de ces tickers. Curated ne traite que les tickers réussis dans Staging.
+Les tâches `ingest_file` et `ingest_api` poussent leur résultat dans XCom. Staging lit ces XCom pour construire la liste des tickers ayant réussi. Curated utilise ensuite la liste des tickers traités par Staging.
 
-![Liste du DAG dans Airflow](../docs/captures/airflow-dags.png)
+![DAG actif dans Airflow](../docs/captures/08-airflow-dags.png)
 
-La page d'accueil Airflow montre un DAG actif, aucun DAG en échec et sept tâches récentes en succès. Le planning visible correspond à la configuration du code.
+![Run final dans la vue Grid](../docs/captures/09-airflow-grid.png)
 
-![Détail de l'exécution Airflow](../docs/captures/airflow-execution.png)
+Le run `documentation_verified_20260712T075000Z` s'est terminé en 49,3 secondes. Les sept tâches sont en succès.
 
-Nous avons déclenché le run `docs_20260710T171652Z`. Son état final est `success`. Il a commencé à 17:17:05 UTC et s'est terminé à 17:18:00 UTC, soit 55 secondes. La grille montre les sept tâches en vert.
+Le log `log_summary` indique une ingestion fichier réussie, quatorze ingestions API réussies, aucune erreur, 746 lignes Staging, 746 lignes Curated et 37 anomalies.
 
-Les états relevés en ligne de commande confirment la capture :
+## API
 
-```text
-start               success
-ingest_file         success
-ingest_api          success
-transform_staging   success
-transform_curated   success
-log_summary         success
-end                 success
-```
+![Routes exposées dans Swagger](../docs/captures/01-swagger-routes.png)
 
-## API FastAPI
+Les routes de lecture utilisent directement les clients PostgreSQL, MinIO et Elasticsearch du module de dépendances API. Le client n'a pas besoin de connaître les schémas ou protocoles propres à ces stockages.
 
-FastAPI expose les données sans accès direct aux bases.
+`GET /raw` lit Elasticsearch. Le paramètre `source` accepte `file`, `api` et `manual` et les traduit vers les valeurs stockées.
 
-![Routes Swagger](../docs/captures/api-swagger.png)
+`GET /staging` et `GET /curated` utilisent une pagination avec `limit` et `offset`. Les dates et les tickers peuvent être filtrés.
 
-La capture montre les groupes Health, Stats, Raw, Staging, Curated, Ingest et Ingest Fast. Ce sont les routeurs enregistrés dans `api/main.py`.
+`POST /ingest` traite les tickers un par un. `POST /ingest_fast` utilise huit threads pour les téléchargements, huit threads pour MinIO, une écriture Elasticsearch groupée et `execute_values` pour PostgreSQL.
 
-### Lecture des zones
+Les deux routes manuelles écrivent la source `yfinance_manual` dans Elasticsearch. Cette source commune permet au benchmark de comparer les deux implémentations sans donner un sens métier différent aux documents.
 
-`GET /raw` interroge Elasticsearch. Les paramètres permettent de filtrer le ticker, la source, la date de début, la date de fin et le nombre de documents.
+## Benchmark versionné
 
-`GET /raw/objects` liste les objets du bucket fichier ou API dans MinIO.
+Le script de benchmark appelle les deux routes avec un lot de 1 ticker et un lot de 100 tickers. Il effectue trois répétitions et alterne l'ordre des appels pour limiter l'avantage systématique du premier mode.
 
-`GET /staging` lit PostgreSQL avec les filtres ticker et dates, puis applique `limit` et `offset`.
+Le JSON versionné contient les médianes suivantes :
 
-`GET /curated` ajoute les filtres `anomalies_only` et `signal`.
+- 1 ticker : 1 073,29 ms en mode standard et 989,86 ms en mode rapide, soit 7,77 % de gain ;
+- 100 tickers : 104 825,65 ms en mode standard et 12 230,36 ms en mode rapide, soit 88,33 % de gain.
 
-Les routes `/staging/tickers`, `/curated/anomalies/summary` et `/curated/signals` fournissent des regroupements déjà calculés par PostgreSQL.
+L'objectif de 30 % est atteint pour 100 tickers, pas pour un ticker. Le fichier de benchmark a été produit avant la validation finale du 12 juillet. Il est conservé comme résultat du test de performance, mais il ne doit pas être confondu avec le run Airflow final.
 
-### Déclenchement manuel
+## Tests
 
-`POST /ingest` traite les tickers l'un après l'autre. Le téléchargement, l'écriture Raw, Staging et Curated sont mesurés séparément.
+La commande `uv run pytest -q` retourne 14 tests réussis.
 
-`POST /ingest_fast` utilise un pool de huit threads pour télécharger les tickers et envoyer les fichiers dans MinIO. Il regroupe les documents dans une seule écriture Elasticsearch et les lignes Staging avec `execute_values`.
+Les tests utilisent des DataFrames locaux et des mocks pour Elasticsearch. Ils couvrent les calculs financiers et la logique du benchmark. Ils ne démarrent pas Docker et ne testent pas les connexions réelles.
 
-Les deux routes limitent les lots à 200 tickers et renvoient les erreurs par étape.
+Le test d'intégration est donc séparé : reconstruction des images, volumes vides, `/health`, `pip check`, absence d'erreur d'import Airflow, run complet et lecture des trois zones.
 
-## Résultats observés
+## Résultats de la validation finale
 
-Après le lancement de Docker Compose et l'exécution du DAG, `GET /health` a retourné :
+La validation a été faite le 12 juillet 2026 après `docker compose down -v` puis `docker compose up -d --build`.
 
-```text
-overall          ok
-PostgreSQL       ok
-MinIO            ok
-Elasticsearch    ok, version 8.11.0
-```
+Résultats :
 
-`GET /stats` a retourné :
+- 14 tests Python réussis ;
+- toutes les images construites depuis les fichiers actuels ;
+- API et Airflow sans dépendance cassée ;
+- PostgreSQL, MinIO et Elasticsearch en état `ok` ;
+- aucune erreur d'import du DAG ;
+- 1 source fichier et 14 sources API réussies ;
+- 15 objets MinIO ;
+- 746 documents Elasticsearch ;
+- 746 lignes Staging ;
+- 746 lignes Curated ;
+- 37 anomalies, soit 4,96 % des lignes Curated ;
+- sept tâches Airflow réussies en 49,3 secondes.
 
-```text
-Objets MinIO fichier    200
-Objets MinIO API         42
-Documents Elasticsearch 1763
-Lignes Staging          1243
-Lignes Curated          1243
-Anomalies                 37
-```
+![Compteurs Raw et Staging](../docs/captures/03-api-stats.png)
 
-![Résumé des résultats](../docs/captures/resultats-execution.png)
+![Compteurs Curated](../docs/captures/04-api-stats-curated.png)
 
-La capture regroupe l'état des services et les volumes observés. MinIO contient plus d'objets que le nombre de tickers parce que l'ingestion API crée un objet horodaté à chaque exécution. Elasticsearch utilise des identifiants stables et met à jour une même date au lieu de dupliquer chaque passage.
+## Limites
 
-Staging et Curated ont tous les deux 1 243 lignes. Curated enrichit les lignes Staging et conserve la même clé `(ticker, date)`. Les 37 anomalies représentent environ 3 % du total global. Le taux n'est pas exactement 5 % au niveau global parce que le modèle est entraîné séparément par ticker et ne s'exécute pas sous 30 lignes.
+Yahoo Finance reste un service externe. Une panne, une limitation ou une modification de réponse peut produire une erreur par ticker.
 
-## Lecture d'une ligne AAPL
+Le dataset fichier ne rejoint pas l'historique API de façon continue. Le calcul des rendements ne corrige pas cette rupture.
 
-![AAPL dans Raw, Staging et Curated](../docs/captures/zones-aapl.png)
+Les tickers qui ne possèdent qu'une ligne ne passent pas dans Isolation Forest. Le modèle ne travaille réellement que sur AAPL lors du run final.
 
-La ligne présentée porte sur le 10 juillet 2026.
+Le signal technique n'a pas été évalué comme stratégie d'investissement.
 
-Dans Raw, le cours de clôture vaut 314,539886 et le volume 14 262 307. La source est `yfinance_fast`. La zone garde aussi l'heure d'ingestion.
+Les identifiants sont écrits dans Docker Compose pour simplifier la correction locale. Le CORS de FastAPI accepte toutes les origines. Ce choix ne convient pas à une mise en ligne publique.
 
-Dans Staging, le cours est arrondi par le type PostgreSQL. La SMA 20 vaut 313,493982, le MACD 0,334471, le rendement journalier -0,005313 et la volatilité 0,008536.
-
-Dans Curated, le score d'anomalie vaut -0,527124. La ligne n'est pas classée comme anomalie. Sa tendance est `neutral` et son signal est `hold`.
-
-Cette capture montre que chaque zone ajoute des informations sans changer le ticker ni la date.
-
-## Benchmark
-
-Le benchmark commité dans `livrables/benchmark_ingest_vs_ingest_fast.json` utilise trois répétitions et alterne l'ordre des deux endpoints.
-
-Pour un ticker :
-
-```text
-/ingest       1 073,29 ms
-/ingest_fast    989,86 ms
-Gain              7,77 %
-```
-
-Pour 100 tickers :
-
-```text
-/ingest       104 825,65 ms
-/ingest_fast   12 230,36 ms
-Gain               88,33 %
-```
-
-Les douze appels du benchmark ont retourné `success`. Sur un ticker, le coût de création des threads et les étapes communes limitent le gain. Sur 100 tickers, les téléchargements parallèles et les écritures groupées réduisent nettement la durée.
-
-Le JSON associe ces mesures au commit `85aa820`. Une modification des pipelines demande un nouveau benchmark avant de remplacer ces chiffres.
-
-## Tests exécutés
-
-La commande utilisée est :
-
-```bash
-PYTHONPATH=.:api .venv/bin/python -m pytest -q
-```
-
-Résultat : 12 tests réussis.
-
-Les tests vérifient notamment :
-
-- le comportement du RSI sur une série en hausse et une série constante ;
-- les règles de tendance et de signal ;
-- la déduplication Staging ;
-- la stabilité des identifiants Elasticsearch ;
-- la validation du CSV ;
-- le calcul du gain et du statut du benchmark.
-
-Nous avons aussi compilé les modules Python, validé `docker compose config` et vérifié l'absence d'erreurs d'import Airflow.
-
-## Limites constatées pendant l'exécution
-
-Le service Yahoo Finance reste externe au projet. Une requête peut prendre plus de temps ou ne retourner aucune ligne.
-
-Le RSI demande quatorze observations. Dans `/ingest_fast`, les indicateurs Staging sont calculés sur le lot téléchargé avant l'upsert. Avec `period: 5d`, le RSI des nouvelles lignes reste donc vide. Pour notre capture courte, le signal Curated reste `hold` quand le RSI manque.
-
-Curated relit l'historique Staging complet des tickers demandés. Lors d'une petite ingestion, son compteur `processed` peut donc être bien supérieur au nombre de nouvelles lignes téléchargées.
-
-Le paramètre de contamination fixe une proportion attendue d'anomalies. Une anomalie indique un point isolé par rapport aux variables utilisées, pas une erreur certaine dans le marché.
-
-Les comptes et mots de passe définis dans Docker Compose servent uniquement au lancement local du projet.
-
-## Reproduction
-
-```bash
-docker compose up -d
-curl http://localhost:8000/health
-curl http://localhost:8000/stats
-```
-
-Déclenchement du DAG :
-
-```bash
-docker compose exec airflow-scheduler \
-  airflow dags trigger financial_data_lake_pipeline
-```
-
-Test d'une ingestion manuelle :
-
-```bash
-curl -X POST http://localhost:8000/ingest_fast \
-  -H "Content-Type: application/json" \
-  -d '{"data":{"tickers":["AAPL","MSFT","NVDA"],"period":"5d","run_staging":true,"run_curated":true}}'
-```
-
-Contrôle des trois zones :
-
-```bash
-curl "http://localhost:8000/raw?ticker=AAPL&limit=1"
-curl "http://localhost:8000/staging?ticker=AAPL&limit=1"
-curl "http://localhost:8000/curated?ticker=AAPL&limit=1"
-```
+Le projet reste organisé en modules à la racine et n'est pas installable comme package `src` réutilisable par un autre dépôt.

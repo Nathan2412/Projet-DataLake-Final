@@ -82,7 +82,9 @@ def ingest(body: IngestRequest) -> IngestResponse:
             try:
                 df          = fetch_ticker_data(ticker, period, "1d")
                 object_name = upload_to_minio(minio_client, ticker, df)
-                indexed     = index_to_elasticsearch(es, df)
+                # Les deux endpoints manuels utilisent la même source ES afin
+                # que le benchmark compare deux implémentations du même flux.
+                indexed     = index_to_elasticsearch(es, df, source="yfinance_manual")
                 raw_results["success"].append({"ticker": ticker, "rows": len(df)})
             except Exception as exc:
                 err = {"ticker": ticker, "step": "raw", "error": str(exc)}

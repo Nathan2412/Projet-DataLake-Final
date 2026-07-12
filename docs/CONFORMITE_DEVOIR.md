@@ -1,114 +1,83 @@
-# Vérification par rapport au sujet
+# Conformité au sujet
 
-Sujet : Data Lakes & Data Integration, projet final EFREI 2025-2026.
+Ce document relie les demandes du sujet au fonctionnement vérifié du dépôt. Les résultats chiffrés viennent du run `documentation_verified_20260712T075000Z` exécuté le 12 juillet 2026 sur des volumes Docker vides.
 
-Cette page relie les demandes du sujet aux fichiers et aux résultats observés le 10 juillet 2026.
+## Deux sources de données
 
-## Data lake de bout en bout
+Le projet utilise un fichier CSV versionné et Yahoo Finance.
 
-Le flux exécuté est le suivant :
+Le fichier contient 732 lignes AAPL du 3 janvier 2022 au 29 novembre 2024. L'ingestion Yahoo Finance traite quatorze tickers configurés. Le run final compte une ingestion fichier réussie et quatorze ingestions API réussies, sans erreur.
 
-```text
-Deux sources --> Raw --> Staging --> Curated --> API
-```
+## Zone Raw
 
-Preuves dans le dépôt :
+MinIO stocke les objets reçus. Elasticsearch indexe les lignes financières pour la recherche.
 
-- ingestion : `ingestion/ingest_file.py` et `ingestion/ingest_api.py` ;
-- transformation : `transformation/staging/transform_staging.py` et `transformation/curated/transform_curated.py` ;
-- stockage : `docker-compose.yml` et `scripts/init_db.sql` ;
-- orchestration : `airflow/dags/financial_pipeline_dag.py` ;
-- exposition : `api/main.py` et `api/routers/`.
+Après le run final, MinIO contient un objet dans `raw-financial-data` et quatorze objets dans `raw-api-data`. Elasticsearch contient 746 documents.
 
-## Deux sources
+Preuves : réponses `/stats`, `/raw`, console MinIO et captures 03, 05 et 10.
 
-Le projet utilise réellement :
+## Zone Staging
 
-- `data/finance_dataset.csv` comme source fichier versionnée ;
-- Yahoo Finance par la bibliothèque `yfinance` comme source API.
+Staging normalise les types, trie les dates, retire les doublons et calcule SMA, EMA, RSI, MACD, bandes de Bollinger, rendement et volatilité.
 
-L'exécution contrôlée a produit 200 objets dans le bucket fichier et 42 objets dans le bucket API.
+PostgreSQL contient 746 lignes Staging après le run. La clé `(ticker, date)` permet de rejouer le pipeline sans multiplier les lignes d'une date existante.
 
-## Trois zones
+Preuves : route `/staging`, route `/staging/tickers` et capture 06.
 
-Raw utilise deux stockages :
+## Zone Curated
 
-- MinIO pour les objets CSV et JSON ;
-- Elasticsearch pour les lignes brutes interrogeables.
+Curated utilise Isolation Forest lorsque le ticker possède au moins 30 lignes. Le modèle travaille avec le rendement, la volatilité, le z-score du volume et le RSI. Le code ajoute le type d'anomalie, la tendance et le signal.
 
-Staging utilise la table PostgreSQL `staging_ohlcv`.
+PostgreSQL contient 746 lignes Curated et 37 anomalies après le run final. Les 37 anomalies concernent AAPL, seul ticker qui possède assez d'historique lors de ce run.
 
-Curated utilise la table PostgreSQL `curated_analysis`.
+Preuves : routes `/curated`, `/curated/anomalies/summary`, `/curated/signals` et capture 07.
 
-Après l'exécution, Staging et Curated contenaient chacun 1 243 lignes.
+## Orchestration Airflow
 
-## Pipeline Airflow
+Le DAG `financial_data_lake_pipeline` contient sept tâches. Les deux ingestions s'exécutent en parallèle. Staging, Curated et le résumé s'exécutent ensuite dans cet ordre.
 
-Le DAG `financial_data_lake_pipeline` exécute sept tâches. Le run `docs_20260710T171652Z` s'est terminé en 55 secondes avec sept statuts `success`.
+Le planning est `0 6 * * 1-5`. Le run final a terminé les sept tâches en 49,3 secondes.
 
-La capture se trouve dans `docs/captures/airflow-execution.png`.
+Preuves : liste des DAGs, vue Grid et log `PIPELINE SUMMARY`, captures 08 et 09.
 
-Le planning du code est `0 6 * * 1-5`, soit 6 h UTC du lundi au vendredi.
+## API
 
-## API Gateway
+FastAPI fournit onze routes métier pour contrôler les services, consulter les zones, lire les compteurs et lancer les deux modes d'ingestion manuelle.
 
-FastAPI expose les routes demandées :
+Preuves : schéma OpenAPI et capture 01.
 
-- `/raw` ;
-- `/staging` ;
-- `/curated` ;
-- `/health` ;
-- `/stats`.
+## Optimisation de l'ingestion
 
-Le projet ajoute aussi `/raw/objects`, `/staging/tickers`, `/curated/anomalies/summary`, `/curated/signals`, `/ingest` et `/ingest_fast`.
+Le mode standard traite les tickers séquentiellement. Le mode rapide parallélise les téléchargements et les envois MinIO, groupe l'indexation Elasticsearch et utilise `execute_values` pour PostgreSQL.
 
-La capture Swagger se trouve dans `docs/captures/api-swagger.png`.
+Le benchmark versionné effectue trois répétitions pour 1 et 100 tickers. Le gain médian est de 7,77 % pour un ticker et de 88,33 % pour 100 tickers. Le seuil de 30 % est donc atteint uniquement sur le lot de 100.
 
-## Traitement avancé
+## Reproductibilité
 
-La zone Curated applique Isolation Forest à quatre variables et enregistre le score, le booléen d'anomalie et son type. Elle calcule aussi une tendance et un signal.
+Le dépôt contient `pyproject.toml`, `.python-version` et `uv.lock` à la racine. `uv sync --frozen --all-groups` crée l'environnement local. FastAPI et Airflow utilisent les mêmes versions métier verrouillées.
 
-L'état observé contenait 37 anomalies sur 1 243 lignes Curated.
+Les anciens fichiers de dépendances séparés ont été retirés pour éviter deux sources de vérité. Les builds Docker exécutent un contrôle de compatibilité.
 
-## Ingestion optimisée
+## Tests
 
-`/ingest` traite les téléchargements séquentiellement.
+La suite contient 14 tests réussis. Elle couvre les indicateurs, les tendances, les signaux, la préparation du CSV, la déduplication, les identifiants Raw, l'indexation simulée et le benchmark.
 
-`/ingest_fast` utilise :
+La validation Docker complète les tests unitaires avec les vraies connexions et un run Airflow.
 
-- huit threads pour les téléchargements ;
-- huit threads pour les envois MinIO ;
-- une écriture Elasticsearch groupée ;
-- `execute_values` pour l'upsert PostgreSQL.
+## Commentaire sur les imports différés
 
-Le benchmark enregistré compare les deux routes avec trois répétitions.
+Le DAG contient un commentaire près des fonctions PythonOperator. Il explique qu'Airflow réimporte régulièrement le fichier et que les dépendances lourdes restent chargées au moment de l'exécution des tâches. Ce choix réduit le travail de parsing et évite qu'une dépendance métier empêche la découverte du DAG.
 
-Pour 100 tickers, la médiane passe de 104 825,65 ms à 12 230,36 ms. Le gain mesuré est 88,33 %. Les mesures et statuts de chaque appel sont dans `livrables/benchmark_ingest_vs_ingest_fast.json`.
+## Organisation en package src
 
-## Documentation et captures
+La recommandation `src` n'est pas implémentée. Le sujet précise que ce point est hors notation. Le projet reste organisé dans les dossiers `config`, `ingestion` et `transformation`. La documentation ne présente donc pas le dépôt comme un package Python réutilisable à l'extérieur.
 
-Le dépôt contient :
+## Points partiellement couverts
 
-- le guide de lancement dans `README.md` ;
-- le rapport dans `livrables/RAPPORT_TECHNIQUE.md` ;
-- cette vérification ;
-- la description du CSV dans `data/README.md` ;
-- cinq captures dans `docs/captures/` ;
-- deux PDF produits par `scripts/generate_pdf_deliverables.py`.
+Le taux d'anomalies dépend du paramètre de contamination fixé à 5 % et du contenu chargé.
 
-## Contrôles exécutés
+Le signal n'a pas été évalué sur une stratégie financière.
 
-```bash
-docker compose up -d
-curl http://localhost:8000/health
-curl http://localhost:8000/stats
-docker compose exec airflow-scheduler airflow dags trigger financial_data_lake_pipeline
-PYTHONPATH=.:api .venv/bin/python -m pytest -q
-```
+La continuité entre le CSV de 2024 et les données API de 2026 n'est pas corrigée. Cette rupture produit un rendement artificiel sur la première ligne API AAPL.
 
-Résultats :
-
-- services PostgreSQL, MinIO et Elasticsearch en état `ok` ;
-- run Airflow terminé avec sept tâches en succès ;
-- endpoints Raw, Staging et Curated accessibles ;
-- 12 tests réussis.
+Les identifiants et le CORS sont adaptés à un environnement local de cours, pas à une exposition publique.

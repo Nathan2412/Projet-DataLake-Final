@@ -1,0 +1,37 @@
+[project]
+name = "financial-data-lake"
+version = "1.0.0"
+description = "Pipeline pédagogique de données financières avec Airflow, MinIO, Elasticsearch, PostgreSQL et FastAPI."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "elasticsearch==8.12.1",
+    "minio==7.2.3",
+    "numpy==1.26.4",
+    "pandas==2.2.0",
+    "psycopg2-binary==2.9.9",
+    "scikit-learn==1.4.0",
+    "yfinance==1.4.1",
+]
+
+[dependency-groups]
+api = [
+    "fastapi==0.110.0",
+    "pydantic==2.6.1",
+    "uvicorn[standard]==0.27.1",
+]
+dev = [
+    "pytest==8.4.2",
+]
+docs = [
+    "reportlab==4.5.1",
+]
+
+[tool.uv]
+package = false
+default-groups = ["dev"]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "api"]
+testpaths = ["tests"]
+
