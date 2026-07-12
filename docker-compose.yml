@@ -18,14 +18,13 @@ x-airflow-common: &airflow-common
     MINIO_SECRET_KEY: minioadmin
     ES_HOST: elasticsearch
     ES_PORT: 9200
+    PYTHONPATH: /opt/airflow/src
     _PIP_ADDITIONAL_REQUIREMENTS: "yfinance==0.2.66 multitasking==0.0.11 pandas numpy scikit-learn boto3 minio==7.2.3 elasticsearch psycopg2-binary requests"
   volumes:
     - ./airflow/dags:/opt/airflow/dags
     - ./airflow/plugins:/opt/airflow/plugins
-    - ./config:/opt/airflow/config
     - ./data:/opt/airflow/data:ro
-    - ./ingestion:/opt/airflow/ingestion
-    - ./transformation:/opt/airflow/transformation
+    - ./src:/opt/airflow/src
     - airflow-logs:/opt/airflow/logs
   depends_on:
     postgres:

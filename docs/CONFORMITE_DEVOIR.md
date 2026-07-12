@@ -14,8 +14,8 @@ Deux sources --> Raw --> Staging --> Curated --> API
 
 Preuves dans le dépôt :
 
-- ingestion : `ingestion/ingest_file.py` et `ingestion/ingest_api.py` ;
-- transformation : `transformation/staging/transform_staging.py` et `transformation/curated/transform_curated.py` ;
+- ingestion : `src/financial_data_lake/ingestion/ingest_file.py` et `src/financial_data_lake/ingestion/ingest_api.py` ;
+- transformation : `src/financial_data_lake/transformation/staging/transform_staging.py` et `src/financial_data_lake/transformation/curated/transform_curated.py` ;
 - stockage : `docker-compose.yml` et `scripts/init_db.sql` ;
 - orchestration : `airflow/dags/financial_pipeline_dag.py` ;
 - exposition : `api/main.py` et `api/routers/`.
@@ -40,11 +40,11 @@ Staging utilise la table PostgreSQL `staging_ohlcv`.
 
 Curated utilise la table PostgreSQL `curated_analysis`.
 
-Après l'exécution, Staging et Curated contenaient chacun 1 243 lignes.
+Après l'exécution, Staging et Curated contenaient chacun 1 254 lignes.
 
 ## Pipeline Airflow
 
-Le DAG `financial_data_lake_pipeline` exécute sept tâches. Le run `docs_20260710T171652Z` s'est terminé en 55 secondes avec sept statuts `success`.
+Le DAG `financial_data_lake_pipeline` exécute sept tâches. Le run `docs_20260712T080930Z` s'est terminé en 45 secondes avec sept statuts `success`.
 
 La capture se trouve dans `docs/captures/airflow-execution.png`.
 
@@ -68,7 +68,7 @@ La capture Swagger se trouve dans `docs/captures/api-swagger.png`.
 
 La zone Curated applique Isolation Forest à quatre variables et enregistre le score, le booléen d'anomalie et son type. Elle calcule aussi une tendance et un signal.
 
-L'état observé contenait 37 anomalies sur 1 243 lignes Curated.
+L'état observé contenait 37 anomalies sur 1 254 lignes Curated.
 
 ## Ingestion optimisée
 

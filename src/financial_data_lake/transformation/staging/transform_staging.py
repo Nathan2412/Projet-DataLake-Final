@@ -20,7 +20,7 @@ import psycopg2.extras
 from elasticsearch import Elasticsearch
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config.settings import POSTGRES, ES_URL, ES_INDEX_RAW
+from financial_data_lake.config.settings import POSTGRES, ES_URL, ES_INDEX_RAW
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -238,5 +238,5 @@ def run_staging(tickers: list[str]) -> dict:
 
 if __name__ == "__main__":
     import json
-    from config.settings import ALL_TICKERS
+    from financial_data_lake.config.settings import ALL_TICKERS
     print(json.dumps(run_staging(ALL_TICKERS), indent=2))

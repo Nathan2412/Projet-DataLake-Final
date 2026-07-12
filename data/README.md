@@ -1,6 +1,6 @@
 # Fichier finance_dataset.csv
 
-`finance_dataset.csv` est la source fichier utilisée par `ingestion/ingest_file.py` et par le DAG Airflow.
+`finance_dataset.csv` est la source fichier utilisée par `src/financial_data_lake/ingestion/ingest_file.py` et par le DAG Airflow.
 
 Contenu vérifié :
 

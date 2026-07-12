@@ -5,10 +5,10 @@ import unittest
 import numpy as np
 import pandas as pd
 
-from ingestion.ingest_api import index_api_data_to_es
-from ingestion.ingest_file import index_to_elasticsearch, load_file_dataset, raw_document_id
-from transformation.curated.transform_curated import classify_anomaly_type
-from transformation.staging.transform_staging import add_technical_indicators, calc_rsi, prepare_staging_dataframe
+from financial_data_lake.ingestion.ingest_api import index_api_data_to_es
+from financial_data_lake.ingestion.ingest_file import index_to_elasticsearch, load_file_dataset, raw_document_id
+from financial_data_lake.transformation.curated.transform_curated import classify_anomaly_type
+from financial_data_lake.transformation.staging.transform_staging import add_technical_indicators, calc_rsi, prepare_staging_dataframe
 from unittest.mock import MagicMock, patch
 
 

@@ -36,10 +36,13 @@ DEFAULT_ARGS = {
 
 
 # Fonctions appelées par les PythonOperators
+# Airflow lit souvent ce fichier pour afficher le DAG.
+# Nous faisons les imports dans chaque tâche pour charger les bibliothèques
+# seulement quand la tâche démarre, et pas à chaque lecture du fichier.
 
 def task_ingest_file(**context) -> dict:
     """Ingère le fichier data/finance_dataset.csv."""
-    from ingestion.ingest_file import ingest_file_source
+    from financial_data_lake.ingestion.ingest_file import ingest_file_source
     results = ingest_file_source()
     # Push le résumé en XCom pour les tâches aval
     context["ti"].xcom_push(key="ingest_file_results", value=results)
@@ -52,7 +55,7 @@ def task_ingest_file(**context) -> dict:
 
 def task_ingest_api(**context) -> dict:
     """Ingère les dernières données depuis l'API Yahoo Finance."""
-    from ingestion.ingest_api import ingest_api_source
+    from financial_data_lake.ingestion.ingest_api import ingest_api_source
     results = ingest_api_source(days_back=2)
     context["ti"].xcom_push(key="ingest_api_results", value=results)
     if results["errors"]:
@@ -67,7 +70,7 @@ def task_transform_staging(**context) -> dict:
     Transforme les données Raw vers la zone Staging.
     Récupère la liste des tickers depuis les XComs des tâches d'ingestion.
     """
-    from transformation.staging.transform_staging import run_staging
+    from financial_data_lake.transformation.staging.transform_staging import run_staging
 
     # Lecture des tickers ingérés avec succès (XCom)
     ti = context["ti"]
@@ -90,7 +93,7 @@ def task_transform_staging(**context) -> dict:
 
 def task_transform_curated(**context) -> dict:
     """Transforme les données Staging vers la zone Curated avec détection d'anomalies."""
-    from transformation.curated.transform_curated import run_curated
+    from financial_data_lake.transformation.curated.transform_curated import run_curated
 
     ti = context["ti"]
     staging_results = ti.xcom_pull(task_ids="transform_staging", key="staging_results") or {}

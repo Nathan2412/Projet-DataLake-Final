@@ -20,8 +20,8 @@ from pydantic import BaseModel, Field
 from elasticsearch import helpers as es_helpers
 
 from dependencies import get_pg_conn
-from ingestion.ingest_file import ensure_es_index, get_es_client, get_minio_client, raw_document_id
-from transformation.staging.transform_staging import prepare_staging_dataframe
+from financial_data_lake.ingestion.ingest_file import ensure_es_index, get_es_client, get_minio_client, raw_document_id
+from financial_data_lake.transformation.staging.transform_staging import prepare_staging_dataframe
 
 log = logging.getLogger(__name__)
 router = APIRouter()
@@ -292,7 +292,7 @@ def ingest_fast(body: IngestFastRequest) -> IngestFastResponse:
         curated_results: dict = {}
         if staged_tickers:
             try:
-                from transformation.curated.transform_curated import run_curated as do_curated
+                from financial_data_lake.transformation.curated.transform_curated import run_curated as do_curated
                 curated_results = do_curated(staged_tickers)
                 all_errors.extend([{**e, "step": "curated"} for e in curated_results.get("errors", [])])
             except Exception as exc:

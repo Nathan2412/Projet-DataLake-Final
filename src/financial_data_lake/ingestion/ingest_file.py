@@ -20,7 +20,7 @@ from minio.error import S3Error
 from elasticsearch import Elasticsearch, helpers
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config.settings import (
+from financial_data_lake.config.settings import (
     MINIO, MINIO_BUCKET_RAW_FILE,
     ES_URL, ES_INDEX_RAW,
     ALL_TICKERS, DEFAULT_PERIOD, DEFAULT_INTERVAL, FINANCIAL_DATASET_PATH,

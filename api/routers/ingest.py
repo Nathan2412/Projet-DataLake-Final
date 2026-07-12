@@ -70,7 +70,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
     t0 = time.perf_counter()
     raw_results = {"success": [], "errors": []}
     try:
-        from ingestion.ingest_file import (
+        from financial_data_lake.ingestion.ingest_file import (
             get_minio_client, get_es_client, ensure_es_index,
             fetch_ticker_data, upload_to_minio, index_to_elasticsearch,
         )
@@ -105,7 +105,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
         successful_tickers = [r["ticker"] for r in raw_results["success"]]
         if successful_tickers:
             try:
-                from transformation.staging.transform_staging import run_staging as do_staging
+                from financial_data_lake.transformation.staging.transform_staging import run_staging as do_staging
                 staging_results = do_staging(successful_tickers)
                 all_errors.extend([{**e, "step": "staging"} for e in staging_results.get("errors", [])])
             except Exception as exc:
@@ -124,7 +124,7 @@ def ingest(body: IngestRequest) -> IngestResponse:
         staged_tickers = [r["ticker"] for r in staging_results.get("success", [])]
         if staged_tickers:
             try:
-                from transformation.curated.transform_curated import run_curated as do_curated
+                from financial_data_lake.transformation.curated.transform_curated import run_curated as do_curated
                 curated_results = do_curated(staged_tickers)
                 all_errors.extend([{**e, "step": "curated"} for e in curated_results.get("errors", [])])
             except Exception as exc:

@@ -20,12 +20,12 @@ from minio import Minio
 from elasticsearch import Elasticsearch, helpers
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from config.settings import (
+from financial_data_lake.config.settings import (
     MINIO, MINIO_BUCKET_RAW_API,
     ES_URL, ES_INDEX_RAW,
     ALL_TICKERS,
 )
-from ingestion.ingest_file import raw_document_id
+from financial_data_lake.ingestion.ingest_file import raw_document_id
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)

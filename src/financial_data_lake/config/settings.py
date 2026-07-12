@@ -1,10 +1,11 @@
 """Configuration centralisée du data lake financier."""
 import os
+from pathlib import Path
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
 FINANCIAL_DATASET_PATH = os.getenv(
     "FINANCIAL_DATASET_PATH",
-    os.path.join(PROJECT_ROOT, "data", "finance_dataset.csv"),
+    str(PROJECT_ROOT / "data" / "finance_dataset.csv"),
 )
 
 # PostgreSQL

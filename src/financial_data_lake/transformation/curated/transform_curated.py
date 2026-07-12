@@ -23,7 +23,7 @@ from sklearn.ensemble import IsolationForest
 from sklearn.preprocessing import StandardScaler
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))))
-from config.settings import POSTGRES
+from financial_data_lake.config.settings import POSTGRES
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 log = logging.getLogger(__name__)
@@ -258,5 +258,5 @@ def run_curated(tickers: list[str]) -> dict:
 
 if __name__ == "__main__":
     import json
-    from config.settings import ALL_TICKERS
+    from financial_data_lake.config.settings import ALL_TICKERS
     print(json.dumps(run_curated(ALL_TICKERS), indent=2))

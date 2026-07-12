@@ -2,17 +2,17 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+ENV PYTHONPATH=/app/src
+
 # Installation des dépendances
 COPY api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Code de l'API et modules partagés
 COPY api/           /app/
-COPY config/        /app/config/
 COPY data/          /app/data/
-COPY ingestion/     /app/ingestion/
-COPY transformation/ /app/transformation/
-COPY tests/          /app/tests/
+COPY src/           /app/src/
+COPY tests/         /app/tests/
 
 EXPOSE 8000
 
