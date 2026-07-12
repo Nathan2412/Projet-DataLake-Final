@@ -112,7 +112,7 @@ class RawDocumentAndStagingTests(unittest.TestCase):
             {"ticker": "AAPL", "date": "2024-01-02", "open": 1, "high": 2, "low": 1, "close": 2, "adj_close": 2, "volume": 10}
         ]
         df = pd.DataFrame(rows)
-        with patch("ingestion.ingest_file.helpers.bulk") as mock_bulk:
+        with patch("financial_data_lake.ingestion.ingest_file.helpers.bulk") as mock_bulk:
             mock_bulk.return_value = (1, [])
             index_to_elasticsearch(MagicMock(), df, source="yfinance_file")
             mock_bulk.assert_called_once()
@@ -126,7 +126,7 @@ class RawDocumentAndStagingTests(unittest.TestCase):
                 {"date": "2024-02-01", "open": 10, "high": 11, "low": 9, "close": 10.5, "volume": 100},
             ],
         }
-        with patch("ingestion.ingest_api.helpers.bulk") as mock_bulk:
+        with patch("financial_data_lake.ingestion.ingest_api.helpers.bulk") as mock_bulk:
             mock_bulk.return_value = (1, [])
             index_api_data_to_es(MagicMock(), payload)
             mock_bulk.assert_called_once()
